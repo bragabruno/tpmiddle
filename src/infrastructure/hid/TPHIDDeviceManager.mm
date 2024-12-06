@@ -1,0 +1,298 @@
+#import "TPHIDDeviceManager.h"
+#import "TPLogger.h"
+#import <CoreGraphics/CoreGraphics.h>
+#import <IOKit/hid/IOHIDKeys.h>
+#import <ApplicationServices/ApplicationServices.h>
+
+// Forward declarations for callbacks
+static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef device);
+static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef device);
+static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void *sender, IOHIDValueRef value);
+
+@interface TPHIDDeviceManager () {
+    IOHIDManagerRef _hidManager;
+    NSMutableArray *_devices;
+    NSMutableArray *_matchingCriteria;
+    BOOL _isRunning;
+}
+@end
+
+@implementation TPHIDDeviceManager
+
+@synthesize devices = _devices;
+@synthesize isRunning = _isRunning;
+
+- (instancetype)init {
+    if (self = [super init]) {
+        _devices = [[NSMutableArray alloc] init];
+        _matchingCriteria = [[NSMutableArray alloc] init];
+        _isRunning = NO;
+        [self setupHIDManager];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [self stop];
+}
+
+- (void)setupHIDManager {
+    _hidManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+    if (!_hidManager) {
+        NSLog(@"Failed to create HID Manager");
+        return;
+    }
+    NSLog(@"HID Manager created successfully");
+    
+    IOHIDManagerRegisterDeviceMatchingCallback(_hidManager, Handle_DeviceMatchingCallback, (__bridge void *)self);
+    IOHIDManagerRegisterDeviceRemovalCallback(_hidManager, Handle_DeviceRemovalCallback, (__bridge void *)self);
+    IOHIDManagerRegisterInputValueCallback(_hidManager, Handle_IOHIDInputValueCallback, (__bridge void *)self);
+    
+    IOHIDManagerScheduleWithRunLoop(_hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+    NSLog(@"HID Manager scheduled with run loop");
+}
+
+- (NSError *)checkPermissions {
+    // Check accessibility permissions
+    NSDictionary *options = @{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES};
+    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    
+    if (!accessibilityEnabled) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorPermissionDenied
+                             userInfo:@{NSLocalizedDescriptionKey: @"Accessibility permissions not granted"}];
+    }
+    
+    // Check input monitoring permissions
+    if (!CGRequestScreenCaptureAccess()) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorPermissionDenied
+                             userInfo:@{NSLocalizedDescriptionKey: @"Input monitoring permissions not granted"}];
+    }
+    
+    return nil;
+}
+
+- (NSError *)validateConfiguration {
+    if (!_hidManager) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorInvalidConfiguration
+                             userInfo:@{NSLocalizedDescriptionKey: @"HID Manager not properly configured"}];
+    }
+    
+    // Check if any device matching criteria have been added
+    if (_matchingCriteria.count == 0) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorInvalidConfiguration
+                             userInfo:@{NSLocalizedDescriptionKey: @"No device matching criteria configured"}];
+    }
+    
+    return nil;
+}
+
+- (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
+    if (!_hidManager) return;
+    
+    NSDictionary *criteria = @{
+        @(kIOHIDDeviceUsagePageKey): @(usagePage),
+        @(kIOHIDDeviceUsageKey): @(usage)
+    };
+    
+    [_matchingCriteria addObject:criteria];
+    
+    // Update the device matching criteria
+    NSArray *criteriaArray = [_matchingCriteria copy];
+    IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Added device matching criteria - Usage Page: %d, Usage: %d", usagePage, usage]];
+}
+
+- (void)addVendorMatching:(uint32_t)vendorID {
+    if (!_hidManager) return;
+    
+    NSDictionary *criteria = @{
+        @(kIOHIDVendorIDKey): @(vendorID)
+    };
+    
+    [_matchingCriteria addObject:criteria];
+    
+    // Update the device matching criteria
+    NSArray *criteriaArray = [_matchingCriteria copy];
+    IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Added vendor matching criteria - Vendor ID: %d", vendorID]];
+}
+
+- (BOOL)start {
+    if (_isRunning) return YES;
+    
+    // Check permissions first
+    NSError *permissionError = [self checkPermissions];
+    if (permissionError) {
+        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
+            [self.delegate didEncounterError:permissionError];
+        }
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Permission error: %@", permissionError.localizedDescription]];
+        return NO;
+    }
+    
+    // Validate configuration
+    NSError *configError = [self validateConfiguration];
+    if (configError) {
+        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
+            [self.delegate didEncounterError:configError];
+        }
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Configuration error: %@", configError.localizedDescription]];
+        return NO;
+    }
+    
+    IOReturn result = IOHIDManagerOpen(_hidManager, kIOHIDOptionsTypeNone);
+    _isRunning = (result == kIOReturnSuccess);
+    
+    if (_isRunning) {
+        [[TPLogger sharedLogger] logMessage:@"HID Manager started successfully"];
+    } else {
+        NSError *error = [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                           code:TPHIDManagerErrorDeviceAccessFailed
+                                       userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to start HID Manager with result: %d", result]}];
+        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
+            [self.delegate didEncounterError:error];
+        }
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Failed to start HID manager with result: %d", result]];
+    }
+    
+    return _isRunning;
+}
+
+- (void)stop {
+    if (!_isRunning) return;
+    
+    if (_hidManager) {
+        IOHIDManagerUnscheduleFromRunLoop(_hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+        IOHIDManagerClose(_hidManager, kIOHIDOptionsTypeNone);
+        CFRelease(_hidManager);
+        _hidManager = NULL;
+    }
+    
+    _isRunning = NO;
+    [[TPLogger sharedLogger] logMessage:@"HID Manager stopped"];
+}
+
+- (NSString *)deviceStatus {
+    NSMutableString *status = [NSMutableString string];
+    [status appendString:@"=== HID Manager Device Status ===\n"];
+    [status appendFormat:@"Running: %@\n", _isRunning ? @"Yes" : @"No"];
+    [status appendFormat:@"Connected Devices: %lu\n", (unsigned long)_devices.count];
+    
+    @synchronized(_devices) {
+        for (id device in _devices) {
+            IOHIDDeviceRef deviceRef = (__bridge IOHIDDeviceRef)device;
+            NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductKey));
+            NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDVendorIDKey));
+            NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductIDKey));
+            [status appendFormat:@"- Device: %@\n  Vendor ID: 0x%04X\n  Product ID: 0x%04X\n",
+             product, vendorID.unsignedIntValue, productID.unsignedIntValue];
+        }
+    }
+    
+    [status appendString:@"===========================\n"];
+    return status;
+}
+
+- (NSString *)currentConfiguration {
+    NSMutableString *config = [NSMutableString string];
+    [config appendString:@"=== HID Manager Configuration ===\n"];
+    
+    [config appendFormat:@"Number of Matching Criteria: %lu\n", (unsigned long)_matchingCriteria.count];
+    
+    for (NSDictionary *criteria in _matchingCriteria) {
+        [config appendString:@"Matching Criteria:\n"];
+        for (NSString *key in criteria) {
+            [config appendFormat:@"  %@: %@\n", key, criteria[key]];
+        }
+    }
+    
+    [config appendString:@"==============================\n"];
+    return config;
+}
+
+#pragma mark - Device Management
+
+- (void)deviceAdded:(IOHIDDeviceRef)device {
+    if (!device) return;
+    
+    @synchronized(_devices) {
+        if (![_devices containsObject:(__bridge id)device]) {
+            [_devices addObject:(__bridge id)device];
+            
+            NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+            NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey));
+            NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey));
+            
+            NSLog(@"Device added - Product: %@, Vendor ID: %@, Product ID: %@", product, vendorID, productID);
+            
+            if ([self.delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
+                [self.delegate didDetectDeviceAttached:product];
+            }
+        }
+    }
+}
+
+- (void)deviceRemoved:(IOHIDDeviceRef)device {
+    if (!device) return;
+    
+    @synchronized(_devices) {
+        if ([_devices containsObject:(__bridge id)device]) {
+            NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+            [_devices removeObject:(__bridge id)device];
+            
+            NSLog(@"Device removed - Product: %@", product);
+            
+            if ([self.delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
+                [self.delegate didDetectDeviceDetached:product];
+            }
+        }
+    }
+}
+
+#pragma mark - Callbacks
+
+static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
+    if (result != kIOReturnSuccess || !context || !device) {
+        NSLog(@"Device matching callback failed with result: %d", result);
+        return;
+    }
+    
+    TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [manager deviceAdded:device];
+    });
+}
+
+static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
+    if (result != kIOReturnSuccess || !context || !device) {
+        NSLog(@"Device removal callback failed with result: %d", result);
+        return;
+    }
+    
+    TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [manager deviceRemoved:device];
+    });
+}
+
+static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void *sender __unused, IOHIDValueRef value) {
+    if (result != kIOReturnSuccess || !context || !value) {
+        NSLog(@"Input value callback failed with result: %d", result);
+        return;
+    }
+    
+    TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
+    if ([manager.delegate respondsToSelector:@selector(didReceiveHIDValue:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [manager.delegate performSelector:@selector(didReceiveHIDValue:) withObject:(__bridge id)value];
+        });
+    }
+}
+
+@end

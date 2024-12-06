@@ -2,29 +2,19 @@
 
 #ifdef __OBJC__
 
-#import <Foundation/Foundation.h>
-#import <AppKit/AppKit.h>
-#import "TPHIDManager.h"
+#import <Cocoa/Cocoa.h>
+#import "infrastructure/hid/TPHIDManager.h"
 #import "TPButtonManager.h"
 #import "TPStatusBarController.h"
-#import "TPConstants.h"
+#import "TPEventViewController.h"
 
 @interface TPApplication : NSObject <NSApplicationDelegate, TPHIDManagerDelegate, TPButtonManagerDelegate, TPStatusBarControllerDelegate>
 
 + (instancetype)sharedApplication;
 - (void)start;
-
-// Error handling
-- (void)showError:(NSError *)error;
-- (void)showPermissionError:(NSError *)error;
-
-// Status reporting
+- (void)cleanup;
 - (NSString *)applicationStatus;
-- (void)logSystemInfo;
 
 @end
 
-@interface TPApplication (Methods)
-@end
-
-#endif // __OBJC__
+#endif

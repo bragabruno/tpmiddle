@@ -1,49 +1,15 @@
 #import "TPHIDManager.h"
+#import "TPHIDDeviceManager.h"
+#import "TPHIDInputHandler.h"
 #import "TPLogger.h"
 
-@implementation TPHIDManager {
-    IOHIDManagerRef _hidManager;
-    NSMutableArray<TPHIDDevice *> *_devices;
-    BOOL _isRunning;
+@interface TPHIDManager () <TPHIDManagerDelegate> {
+    TPHIDDeviceManager *_deviceManager;
+    TPHIDInputHandler *_inputHandler;
 }
+@end
 
-@synthesize isRunning = _isRunning;
-
-static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
-    if (result != kIOReturnSuccess) {
-        NSLog(@"Device matching callback failed with result: %d", result);
-        return;
-    }
-    
-    TPHIDManager *manager = (__bridge TPHIDManager *)context;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [manager deviceAdded:device];
-    });
-}
-
-static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
-    if (result != kIOReturnSuccess) {
-        NSLog(@"Device removal callback failed with result: %d", result);
-        return;
-    }
-    
-    TPHIDManager *manager = (__bridge TPHIDManager *)context;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [manager deviceRemoved:device];
-    });
-}
-
-static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void *sender __unused, IOHIDValueRef value) {
-    if (result != kIOReturnSuccess) {
-        NSLog(@"Input value callback failed with result: %d", result);
-        return;
-    }
-    
-    TPHIDManager *manager = (__bridge TPHIDManager *)context;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [manager.inputHandler handleInput:value];
-    });
-}
+@implementation TPHIDManager
 
 + (instancetype)sharedManager {
     static TPHIDManager *sharedManager = nil;
@@ -55,123 +21,83 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
 }
 
 - (instancetype)init {
-    self = [super init];
-    if (self) {
-        _devices = [[NSMutableArray alloc] init];
-        _inputHandler = [[TPInputHandler alloc] init];
-        _isRunning = NO;
-        [self setupHIDManager];
+    if (self = [super init]) {
+        _deviceManager = [[TPHIDDeviceManager alloc] init];
+        _deviceManager.delegate = self;
+        
+        _inputHandler = [[TPHIDInputHandler alloc] init];
     }
     return self;
 }
 
-- (void)dealloc {
-    if (_hidManager) {
-        IOHIDManagerClose(_hidManager, kIOHIDOptionsTypeNone);
-        CFRelease(_hidManager);
-    }
+- (void)setDelegate:(id<TPHIDManagerDelegate>)delegate {
+    _inputHandler.delegate = delegate;
+}
+
+- (id<TPHIDManagerDelegate>)delegate {
+    return _inputHandler.delegate;
+}
+
+- (NSArray *)devices {
+    return _deviceManager.devices;
+}
+
+- (BOOL)isRunning {
+    return _deviceManager.isRunning;
+}
+
+- (BOOL)isScrollMode {
+    return _inputHandler.isScrollMode;
 }
 
 - (BOOL)start {
-    if (_isRunning) return YES;
-    
-    IOReturn result = IOHIDManagerOpen(_hidManager, kIOHIDOptionsTypeNone);
-    _isRunning = (result == kIOReturnSuccess);
-    
-    if (_isRunning) {
-        NSLog(@"HID Manager started successfully");
-    } else {
-        NSLog(@"Failed to start HID Manager with result: %d", result);
-    }
-    
-    return _isRunning;
+    return [_deviceManager start];
 }
 
 - (void)stop {
-    if (!_isRunning) return;
-    
-    IOHIDManagerClose(_hidManager, kIOHIDOptionsTypeNone);
-    _isRunning = NO;
-    NSLog(@"HID Manager stopped");
-}
-
-- (void)setupHIDManager {
-    _hidManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-    if (!_hidManager) {
-        NSLog(@"Failed to create HID Manager");
-        return;
-    }
-    
-    IOHIDManagerRegisterDeviceMatchingCallback(_hidManager, Handle_DeviceMatchingCallback, (__bridge void *)self);
-    IOHIDManagerRegisterDeviceRemovalCallback(_hidManager, Handle_DeviceRemovalCallback, (__bridge void *)self);
-    IOHIDManagerRegisterInputValueCallback(_hidManager, Handle_IOHIDInputValueCallback, (__bridge void *)self);
-    
-    IOHIDManagerScheduleWithRunLoop(_hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
-    NSLog(@"HID Manager created and scheduled with run loop");
+    [_deviceManager stop];
+    [_inputHandler reset];
 }
 
 - (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
-    NSMutableArray *criteria = [NSMutableArray array];
-    
-    CFDictionaryRef existingCriteria = IOHIDManagerGetDeviceMatching(_hidManager);
-    if (existingCriteria) {
-        [criteria addObject:(__bridge_transfer id)existingCriteria];
-    }
-    
-    [criteria addObject:@{
-        @(kIOHIDDeviceUsagePageKey): @(usagePage),
-        @(kIOHIDDeviceUsageKey): @(usage)
-    }];
-    
-    IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteria);
+    [_deviceManager addDeviceMatching:usagePage usage:usage];
 }
 
 - (void)addVendorMatching:(uint32_t)vendorID {
-    NSMutableArray *criteria = [NSMutableArray array];
-    
-    CFDictionaryRef existingCriteria = IOHIDManagerGetDeviceMatching(_hidManager);
-    if (existingCriteria) {
-        [criteria addObject:(__bridge_transfer id)existingCriteria];
-    }
-    
-    [criteria addObject:@{
-        @(kIOHIDVendorIDKey): @(vendorID)
-    }];
-    
-    IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteria);
+    [_deviceManager addVendorMatching:vendorID];
 }
 
-- (void)deviceAdded:(IOHIDDeviceRef)deviceRef {
-    TPHIDDevice *device = [[TPHIDDevice alloc] initWithDevice:deviceRef];
-    if (![_devices containsObject:device]) {
-        [_devices addObject:device];
-        
-        NSLog(@"Device added - Product: %@, Vendor ID: %@, Product ID: %@", 
-              device.productName, device.vendorID, device.productID);
-        [[TPLogger sharedLogger] logDeviceEvent:device.productName attached:YES];
-        
-        if ([self.delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
-            [self.delegate didDetectDeviceAttached:device.productName];
-        }
+- (NSString *)deviceStatus {
+    return [_deviceManager deviceStatus];
+}
+
+- (NSString *)currentConfiguration {
+    return [_deviceManager currentConfiguration];
+}
+
+#pragma mark - TPHIDManagerDelegate
+
+- (void)didDetectDeviceAttached:(NSString *)deviceInfo {
+    if ([self.delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
+        [self.delegate didDetectDeviceAttached:deviceInfo];
     }
 }
 
-- (void)deviceRemoved:(IOHIDDeviceRef)deviceRef {
-    NSUInteger index = [_devices indexOfObjectPassingTest:^BOOL(TPHIDDevice *device, NSUInteger idx, BOOL *stop) {
-        return [device isEqualToDevice:deviceRef];
-    }];
-    
-    if (index != NSNotFound) {
-        TPHIDDevice *device = _devices[index];
-        [_devices removeObjectAtIndex:index];
-        
-        NSLog(@"Device removed - Product: %@", device.productName);
-        [[TPLogger sharedLogger] logDeviceEvent:device.productName attached:NO];
-        
-        if ([self.delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
-            [self.delegate didDetectDeviceDetached:device.productName];
-        }
+- (void)didDetectDeviceDetached:(NSString *)deviceInfo {
+    if ([self.delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
+        [self.delegate didDetectDeviceDetached:deviceInfo];
     }
+    [_inputHandler reset];
+}
+
+- (void)didEncounterError:(NSError *)error {
+    if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
+        [self.delegate didEncounterError:error];
+    }
+}
+
+- (void)didReceiveHIDValue:(id)value {
+    [_inputHandler handleInput:(__bridge IOHIDValueRef)value];
 }
 
 @end

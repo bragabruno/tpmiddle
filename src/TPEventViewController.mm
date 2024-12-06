@@ -1,259 +1,143 @@
-#include "TPEventViewController.h"
-#include "TPConfig.h"
-#include "TPApplication.h"
-#include "TPConstants.h"
+#import "TPEventViewController.h"
+#import "infrastructure/hid/TPHIDManager.h"
+#import "TPLogger.h"
+#import <QuartzCore/QuartzCore.h>
 
 @interface TPEventViewController () {
-    NSView *_centerIndicator;
+    TPHIDManager *_hidManager;
+    NSTimer *_updateTimer;
     NSPoint _lastPoint;
-    CGFloat _accumulatedScrollX;
-    CGFloat _accumulatedScrollY;
-    BOOL _isMonitoring;
-    TPHIDManager *_hidManager;  // Changed to strong reference
+    NSPoint _currentPoint;
+    NSPoint _deltaPoint;
+    uint8_t _buttonState;
 }
 @end
 
 @implementation TPEventViewController
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
-    NSLog(@"TPEventViewController initWithNibName:%@ bundle:%@", nibNameOrNil, nibBundleOrNil);
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self) {
-        NSLog(@"TPEventViewController initialized with nib");
-        _isMonitoring = NO;
-        _hidManager = [TPHIDManager sharedManager];  // Store strong reference
-        [self registerForNotifications];
+        _hidManager = [TPHIDManager sharedManager];
+        _hidManager.delegate = self;
+        _lastPoint = NSZeroPoint;
+        _currentPoint = NSZeroPoint;
+        _deltaPoint = NSZeroPoint;
+        _buttonState = 0;
     }
     return self;
 }
 
-- (void)registerForNotifications {
-    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-    
-    // Unregister first to prevent duplicates
-    [center removeObserver:self];
-    
-    // Register for movement notifications
-    [center addObserver:self
-               selector:@selector(handleMovementNotification:)
-                   name:kTPMovementNotification
-                 object:nil];
-    
-    // Register for button notifications
-    [center addObserver:self
-               selector:@selector(handleButtonNotification:)
-                   name:kTPButtonNotification
-                 object:nil];
-                 
-    NSLog(@"TPEventViewController registered for notifications: %@ and %@", 
-          kTPMovementNotification, kTPButtonNotification);
-}
-
-- (void)dealloc {
-    NSLog(@"TPEventViewController dealloc - removing notification observers");
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
 - (void)loadView {
     [super loadView];
-    NSLog(@"TPEventViewController loadView called");
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    NSLog(@"TPEventViewController viewDidLoad");
     
-    // Initialize UI
-    self.view.wantsLayer = YES;
-    self.view.layer.backgroundColor = [NSColor windowBackgroundColor].CGColor;
-    
-    // Log outlet connections
-    NSLog(@"Checking outlet connections:");
-    NSLog(@"movementView: %@", self.movementView);
-    NSLog(@"deltaLabel: %@", self.deltaLabel);
-    NSLog(@"scrollLabel: %@", self.scrollLabel);
-    NSLog(@"leftButton: %@", self.leftButton);
-    NSLog(@"middleButton: %@", self.middleButton);
-    NSLog(@"rightButton: %@", self.rightButton);
-    
-    if (!self.movementView) {
-        NSLog(@"Error: movementView outlet not connected!");
+    if (!self.movementView || !self.deltaLabel || !self.scrollLabel) {
+        [[TPLogger sharedLogger] logMessage:@"Failed to load view outlets"];
         return;
     }
     
-    // Setup movement view
-    self.movementView.wantsLayer = YES;
-    self.movementView.layer.backgroundColor = [NSColor gridColor].CGColor;
-    self.movementView.layer.cornerRadius = 4.0;
-    
-    // Create center point indicator
-    _centerIndicator = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 8, 8)];
-    _centerIndicator.wantsLayer = YES;
-    _centerIndicator.layer.backgroundColor = [NSColor systemBlueColor].CGColor;
-    _centerIndicator.layer.cornerRadius = 4.0;
-    [self.movementView addSubview:_centerIndicator];
-    
-    // Center the indicator
-    [self centerIndicator];
-    
-    // Initialize labels
-    self.deltaLabel.stringValue = @"X: 0, Y: 0";
-    self.scrollLabel.stringValue = @"Scroll: 0, 0";
-    
-    // Setup buttons
-    self.leftButton.state = NSControlStateValueOff;
-    self.middleButton.state = NSControlStateValueOff;
-    self.rightButton.state = NSControlStateValueOff;
-    
-    // Reset accumulated values
-    _accumulatedScrollX = 0;
-    _accumulatedScrollY = 0;
-}
-
-- (void)viewDidLayout {
-    [super viewDidLayout];
-    [self centerIndicator];
-}
-
-- (void)centerIndicator {
-    if (!self.movementView) return;
-    
-    NSRect bounds = self.movementView.bounds;
-    _centerIndicator.frame = NSMakeRect(
-        NSMidX(bounds) - 4,
-        NSMidY(bounds) - 4,
-        8, 8
-    );
-    _lastPoint = NSMakePoint(NSMidX(bounds), NSMidY(bounds));
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"View outlets - movementView: %@, deltaLabel: %@, scrollLabel: %@",
+                                       self.movementView,
+                                       self.deltaLabel,
+                                       self.scrollLabel]];
 }
 
 - (void)startMonitoring {
-    if (_isMonitoring) return;
+    if (_updateTimer) {
+        [self stopMonitoring];
+    }
     
-    NSLog(@"TPEventViewController startMonitoring");
-    _isMonitoring = YES;
-    
-    // Reset the view
-    [self centerIndicator];
-    _accumulatedScrollX = 0;
-    _accumulatedScrollY = 0;
-    self.deltaLabel.stringValue = @"X: 0, Y: 0";
-    self.scrollLabel.stringValue = @"Scroll: 0, 0";
-    self.leftButton.state = NSControlStateValueOff;
-    self.middleButton.state = NSControlStateValueOff;
-    self.rightButton.state = NSControlStateValueOff;
+    _updateTimer = [NSTimer scheduledTimerWithTimeInterval:0.016  // ~60 FPS
+                                                  repeats:YES
+                                                    block:^(NSTimer * __unused timer) {
+        [self updateView];
+    }];
 }
 
 - (void)stopMonitoring {
-    if (!_isMonitoring) return;
-    
-    NSLog(@"TPEventViewController stopMonitoring");
-    _isMonitoring = NO;
+    if (_updateTimer) {
+        [_updateTimer invalidate];
+        _updateTimer = nil;
+    }
 }
 
-#pragma mark - Notification Handlers
-
-- (void)handleMovementNotification:(NSNotification *)notification {
-    if (!_isMonitoring) return;
-    
-    @try {
-        NSDictionary *info = notification.userInfo;
-        if (!info) return;
+- (void)updateView {
+    // Update movement visualization
+    if (!NSEqualPoints(_lastPoint, _currentPoint)) {
+        NSRect bounds = self.movementView.bounds;
+        NSPoint center = NSMakePoint(NSMidX(bounds), NSMidY(bounds));
         
-        int deltaX = [info[@"deltaX"] intValue];
-        int deltaY = [info[@"deltaY"] intValue];
-        uint8_t buttons = [info[@"buttons"] unsignedCharValue];
+        // Scale the movement for visualization
+        CGFloat scale = 2.0;
+        NSPoint scaledDelta = NSMakePoint(_deltaPoint.x * scale, _deltaPoint.y * scale);
         
+        // Calculate new point
+        NSPoint newPoint = NSMakePoint(center.x + scaledDelta.x, center.y + scaledDelta.y);
+        
+        // Keep point within bounds
+        newPoint.x = MAX(0, MIN(newPoint.x, bounds.size.width));
+        newPoint.y = MAX(0, MIN(newPoint.y, bounds.size.height));
+        
+        // Draw movement
         dispatch_async(dispatch_get_main_queue(), ^{
-            // Update delta label
-            self.deltaLabel.stringValue = [NSString stringWithFormat:@"X: %d, Y: %d", deltaX, deltaY];
+            NSBezierPath *path = [NSBezierPath bezierPath];
+            [path moveToPoint:_lastPoint];
+            [path lineToPoint:newPoint];
             
-            // Move indicator
-            if (self.movementView) {
-                NSRect bounds = self.movementView.bounds;
-                CGFloat baseScale = 1.0;
-                
-                // Calculate movement magnitude for diagonal scaling
-                CGFloat magnitude = sqrt(deltaX * deltaX + deltaY * deltaY);
-                CGFloat scaleFactor = baseScale * (1.0 + magnitude * 0.05);
-                
-                // Apply scaling uniformly to maintain direction
-                CGFloat scaledDeltaX = deltaX * scaleFactor;
-                CGFloat scaledDeltaY = deltaY * scaleFactor;
-                
-                // Get scroll configuration
-                TPConfig *config = [TPConfig sharedConfig];
-                
-                // Apply inversion if configured
-                if (config.invertScrollX) {
-                    scaledDeltaX = -scaledDeltaX;
-                }
-                if (config.invertScrollY) {
-                    scaledDeltaY = -scaledDeltaY;
-                }
-                
-                // Calculate new position with unified scaling
-                CGFloat newX = self->_lastPoint.x - scaledDeltaX;
-                CGFloat newY = self->_lastPoint.y - scaledDeltaY;
-                
-                // Ensure the center of the indicator stays within bounds
-                CGFloat minX = 4.0;
-                CGFloat maxX = NSWidth(bounds) - 4.0;
-                CGFloat minY = 4.0;
-                CGFloat maxY = NSHeight(bounds) - 4.0;
-                
-                self->_lastPoint.x = fmin(maxX, fmax(minX, newX));
-                self->_lastPoint.y = fmin(maxY, fmax(minY, newY));
-                
-                if (self->_centerIndicator) {
-                    self->_centerIndicator.frame = NSMakeRect(
-                        self->_lastPoint.x - 4,
-                        self->_lastPoint.y - 4,
-                        8, 8
-                    );
-                }
-                
-                // If middle button is pressed or in scroll mode, update scroll accumulation
-                if ((buttons & 0x04) || (self->_hidManager && self->_hidManager.isScrollMode)) {
-                    self->_accumulatedScrollX += deltaX;
-                    self->_accumulatedScrollY += deltaY;
-                    if (self.scrollLabel) {
-                        self.scrollLabel.stringValue = [NSString stringWithFormat:@"Scroll: %.0f, %.0f",
-                                                      self->_accumulatedScrollX, self->_accumulatedScrollY];
-                    }
-                }
+            // Create tracking layer if needed
+            CAShapeLayer *trackingLayer = nil;
+            if (self.movementView.layer.sublayers.count > 0) {
+                trackingLayer = self.movementView.layer.sublayers[0];
+            } else {
+                trackingLayer = [CAShapeLayer layer];
+                [self.movementView.layer addSublayer:trackingLayer];
             }
+            
+            // Configure layer
+            trackingLayer.strokeColor = NSColor.systemBlueColor.CGColor;
+            trackingLayer.fillColor = nil;
+            trackingLayer.lineWidth = 2.0;
+            trackingLayer.path = path.CGPath;
+            
+            // Add fade out animation
+            CABasicAnimation *fadeOut = [CABasicAnimation animationWithKeyPath:@"opacity"];
+            fadeOut.fromValue = @1.0;
+            fadeOut.toValue = @0.0;
+            fadeOut.duration = 0.5;
+            fadeOut.removedOnCompletion = YES;
+            
+            [trackingLayer addAnimation:fadeOut forKey:@"fadeOut"];
         });
-    } @catch (NSException *exception) {
-        NSLog(@"Exception in handleMovementNotification: %@", exception);
+        
+        _lastPoint = newPoint;
     }
+    
+    // Update labels
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Update delta label
+        NSString *deltaText = [NSString stringWithFormat:@"Delta: (%.1f, %.1f)",
+                             _deltaPoint.x, _deltaPoint.y];
+        if (_buttonState > 0) {
+            deltaText = [deltaText stringByAppendingFormat:@"\nButtons: %@%@%@",
+                        (_buttonState & 0x01) ? @"L" : @"-",
+                        (_buttonState & 0x02) ? @"R" : @"-",
+                        (_buttonState & 0x04) ? @"M" : @"-"];
+        }
+        self.deltaLabel.stringValue = deltaText;
+        
+        // Update scroll label if in scroll mode
+        if ((self->_buttonState & 0x04) || (self->_hidManager && self->_hidManager.isScrollMode)) {
+            self.scrollLabel.stringValue = [NSString stringWithFormat:@"Scroll: (%.1f, %.1f)",
+                                          self->_deltaPoint.x, self->_deltaPoint.y];
+        }
+    });
 }
 
-- (void)handleButtonNotification:(NSNotification *)notification {
-    if (!_isMonitoring) return;
-    
-    @try {
-        NSDictionary *info = notification.userInfo;
-        if (!info) return;
-        
-        BOOL left = [info[@"left"] boolValue];
-        BOOL right = [info[@"right"] boolValue];
-        BOOL middle = [info[@"middle"] boolValue];
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.leftButton) {
-                self.leftButton.state = left ? NSControlStateValueOn : NSControlStateValueOff;
-            }
-            if (self.rightButton) {
-                self.rightButton.state = right ? NSControlStateValueOn : NSControlStateValueOff;
-            }
-            if (self.middleButton) {
-                self.middleButton.state = middle ? NSControlStateValueOn : NSControlStateValueOff;
-            }
-        });
-    } @catch (NSException *exception) {
-        NSLog(@"Exception in handleButtonNotification: %@", exception);
-    }
+#pragma mark - TPHIDManagerDelegate
+
+- (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
+    _deltaPoint = NSMakePoint(deltaX, deltaY);
+    _buttonState = buttons;
 }
 
 @end

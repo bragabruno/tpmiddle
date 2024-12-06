@@ -1,13 +1,14 @@
 # Compiler settings
 CXX = clang++
 CXXFLAGS = -std=c++17 -Wall -Wextra -g
-FRAMEWORKS = -framework Foundation -framework IOKit -framework AppKit -framework Cocoa -framework Carbon
+FRAMEWORKS = -framework Foundation -framework IOKit -framework AppKit -framework Cocoa -framework Carbon -framework ApplicationServices -framework QuartzCore
 OBJCFLAGS = -fobjc-arc
 INCLUDES = -I/System/Library/Frameworks/Foundation.framework/Headers \
           -I/System/Library/Frameworks/IOKit.framework/Headers \
           -I/System/Library/Frameworks/AppKit.framework/Headers \
           -I/System/Library/Frameworks/Cocoa.framework/Headers \
-          -I/System/Library/Frameworks/Carbon.framework/Headers
+          -I/System/Library/Frameworks/Carbon.framework/Headers \
+          -I$(SRC_DIR)
 
 # Signing settings
 SIGN_IDENTITY = "-" # Use ad-hoc signing
@@ -24,11 +25,14 @@ SOURCES = src/TPApplication.mm \
          src/TPButtonManager.mm \
          src/TPConfig.mm \
          src/TPEventViewController.mm \
-         src/TPHIDManager.mm \
          src/TPLogger.mm \
          src/TPStatusBarController.mm \
          src/TPConstants.mm \
-         src/main.mm
+         src/main.mm \
+         src/infrastructure/hid/TPHIDManager.mm \
+         src/infrastructure/hid/TPHIDInputHandler.mm \
+         src/infrastructure/hid/TPHIDDeviceManager.mm \
+         src/infrastructure/hid/TPHIDManagerConstants.mm
 
 # Object files
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.mm=$(BUILD_DIR)/%.o)
@@ -48,6 +52,7 @@ all: app
 $(BUILD_DIR) $(BIN_DIR):
 	mkdir -p $@
 	mkdir -p $(BUILD_DIR)/unit/infrastructure
+	mkdir -p $(BUILD_DIR)/infrastructure/hid
 
 # Compile .mm files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.mm
