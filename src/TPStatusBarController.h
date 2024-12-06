@@ -17,6 +17,9 @@
 
 + (instancetype)sharedController;
 
+// Setup
+- (void)setupStatusBar;
+
 // Update UI
 - (void)updateModeDisplay;
 - (void)updateDebugState;

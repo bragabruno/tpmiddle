@@ -76,5 +76,31 @@
     <!-- Screen Recording (for input monitoring) -->
     <key>NSScreenCaptureUsageDescription</key>
     <string>TPMiddle needs input monitoring permissions to detect TrackPoint events.</string>
+    
+    <!-- Background Operation -->
+    <key>LSBackgroundOnly</key>
+    <false/>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+    
+    <!-- HID Device Access -->
+    <key>NSHIDDeviceUsageDescription</key>
+    <string>TPMiddle needs access to HID devices to enable TrackPoint functionality.</string>
+    
+    <!-- Additional Permissions -->
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+    <key>NSRequiresFullScreen</key>
+    <false/>
+    <key>NSQuitAlwaysKeepsWindows</key>
+    <false/>
+    
+    <!-- Launch Services -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>LSMultipleInstancesProhibited</key>
+    <true/>
 </dict>
 </plist>

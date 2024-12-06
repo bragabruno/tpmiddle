@@ -1,7 +1,13 @@
 # Compiler settings
 CXX = clang++
 CXXFLAGS = -std=c++17 -Wall -Wextra -g
-OBJCXXFLAGS = $(CXXFLAGS) -framework Foundation -framework IOKit -framework AppKit -framework Cocoa -fobjc-arc
+FRAMEWORKS = -framework Foundation -framework IOKit -framework AppKit -framework Cocoa -framework Carbon
+OBJCFLAGS = -fobjc-arc
+INCLUDES = -I/System/Library/Frameworks/Foundation.framework/Headers \
+          -I/System/Library/Frameworks/IOKit.framework/Headers \
+          -I/System/Library/Frameworks/AppKit.framework/Headers \
+          -I/System/Library/Frameworks/Cocoa.framework/Headers \
+          -I/System/Library/Frameworks/Carbon.framework/Headers
 
 # Signing settings
 SIGN_IDENTITY = "-" # Use ad-hoc signing
@@ -46,11 +52,11 @@ $(BUILD_DIR) $(BIN_DIR):
 # Compile .mm files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.mm
 	@mkdir -p $(dir $@)
-	$(CXX) $(OBJCXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(OBJCFLAGS) $(INCLUDES) -c $< -o $@
 
 # Link the main application
 $(BIN_DIR)/$(TARGET): $(BUILD_DIR) $(BIN_DIR) $(OBJECTS)
-	$(CXX) $(OBJECTS) $(OBJCXXFLAGS) -o $@
+	$(CXX) $(OBJECTS) $(CXXFLAGS) $(OBJCFLAGS) $(FRAMEWORKS) -o $@
 
 # Compile .xib to .nib
 resources/TPEventViewController.nib: resources/TPEventViewController.xib
@@ -74,11 +80,11 @@ app: $(BIN_DIR)/$(TARGET) resources/TPEventViewController.nib
 # Compile test files
 $(BUILD_DIR)/%.o: $(TEST_DIR)/%.mm
 	@mkdir -p $(dir $@)
-	$(CXX) $(OBJCXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(OBJCFLAGS) $(INCLUDES) -c $< -o $@
 
 # Build and run tests
 test: $(BUILD_DIR) $(BIN_DIR) $(TEST_OBJECTS) $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS))
-	$(CXX) $(TEST_OBJECTS) $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS)) $(OBJCXXFLAGS) -framework XCTest -o $(BIN_DIR)/$(TEST_TARGET)
+	$(CXX) $(TEST_OBJECTS) $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS)) $(CXXFLAGS) $(OBJCFLAGS) $(FRAMEWORKS) -framework XCTest -o $(BIN_DIR)/$(TEST_TARGET)
 	./$(BIN_DIR)/$(TEST_TARGET)
 
 # Clean build files
@@ -91,7 +97,7 @@ format:
 
 # Static analysis
 analyze:
-	clang-tidy $(SOURCES) -- $(OBJCXXFLAGS)
+	clang-tidy $(SOURCES) -- $(CXXFLAGS) $(OBJCFLAGS) $(INCLUDES)
 
 # Install dependencies (for CI)
 install-deps:

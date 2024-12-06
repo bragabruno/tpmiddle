@@ -9,6 +9,7 @@
 
 @interface TPStatusBarController () {
     BOOL _eventViewerVisible;
+    BOOL _isSetup;
 }
 
 @property (strong) NSStatusItem *statusItem;
@@ -30,7 +31,8 @@
 - (instancetype)init {
     if (self = [super init]) {
         _eventViewerVisible = NO;
-        [self setupStatusBar];
+        _isSetup = NO;
+        // Defer setup to be called explicitly after run loop is ready
     }
     return self;
 }
@@ -38,30 +40,36 @@
 #pragma mark - Setup
 
 - (void)setupStatusBar {
+    if (_isSetup) return;
+    
     @try {
-        // Create status bar item
-        self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
-        
-        // Ensure the button is created
-        if (self.statusItem.button == nil) {
-            NSLog(@"Failed to create status item button");
-            return;
-        }
-        
-        // Set initial title
-        NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
-        self.statusItem.button.title = title;
-        
-        // Create menu
-        @autoreleasepool {
-            self.statusMenu = [self createStatusMenu];
-            if (self.statusMenu) {
-                self.statusItem.menu = self.statusMenu;
-                NSLog(@"Status bar setup completed - title: %@", title);
-            } else {
-                NSLog(@"Failed to create status menu");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Create status bar item
+            self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
+            
+            // Ensure the button is created
+            if (self.statusItem.button == nil) {
+                NSLog(@"Failed to create status item button");
+                return;
             }
-        }
+            
+            // Set initial title
+            NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
+            self.statusItem.button.title = title;
+            
+            // Create menu
+            @autoreleasepool {
+                self.statusMenu = [self createStatusMenu];
+                if (self.statusMenu) {
+                    self.statusItem.menu = self.statusMenu;
+                    NSLog(@"Status bar setup completed - title: %@", title);
+                } else {
+                    NSLog(@"Failed to create status menu");
+                }
+            }
+            
+            self->_isSetup = YES;
+        });
     } @catch (NSException *exception) {
         NSLog(@"Exception in setupStatusBar: %@", exception);
     }
@@ -135,7 +143,9 @@
     @try {
         NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
         if (self.statusItem && self.statusItem.button) {
-            self.statusItem.button.title = title;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.statusItem.button.title = title;
+            });
         }
     } @catch (NSException *exception) {
         NSLog(@"Exception in updateModeDisplay: %@", exception);
@@ -143,17 +153,21 @@
 }
 
 - (void)updateDebugState {
-    [self updateMenuStates:self.statusMenu];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self updateMenuStates:self.statusMenu];
+    });
 }
 
 - (void)updateEventViewerState:(BOOL)isVisible {
     @try {
         _eventViewerVisible = isVisible;
-        NSMenuItem *eventViewerItem = [self.statusMenu itemWithTitle:@"Show Event Viewer"];
-        if (eventViewerItem) {
-            eventViewerItem.title = isVisible ? @"Hide Event Viewer" : @"Show Event Viewer";
-            eventViewerItem.state = isVisible ? NSControlStateValueOn : NSControlStateValueOff;
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSMenuItem *eventViewerItem = [self.statusMenu itemWithTitle:@"Show Event Viewer"];
+            if (eventViewerItem) {
+                eventViewerItem.title = isVisible ? @"Hide Event Viewer" : @"Show Event Viewer";
+                eventViewerItem.state = isVisible ? NSControlStateValueOn : NSControlStateValueOff;
+            }
+        });
     } @catch (NSException *exception) {
         NSLog(@"Exception in updateEventViewerState: %@", exception);
     }

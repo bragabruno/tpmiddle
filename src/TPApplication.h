@@ -14,6 +14,14 @@
 + (instancetype)sharedApplication;
 - (void)start;
 
+// Error handling
+- (void)showError:(NSError *)error;
+- (void)showPermissionError:(NSError *)error;
+
+// Status reporting
+- (NSString *)applicationStatus;
+- (void)logSystemInfo;
+
 @end
 
 @interface TPApplication (Methods)

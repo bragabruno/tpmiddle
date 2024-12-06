@@ -2,6 +2,7 @@
 #include "TPConfig.h"
 #include "TPEventViewController.h"
 #include "TPConstants.h"
+#include "TPLogger.h"
 
 @interface TPApplication () {
     BOOL _isInitialized;
@@ -30,39 +31,10 @@
     if (self = [super init]) {
         _isInitialized = NO;
         
-        @try {
-            // Process command line arguments
-            NSArray<NSString *> *arguments = [[NSProcessInfo processInfo] arguments];
-            [[TPConfig sharedConfig] applyCommandLineArguments:arguments];
-            
-            // Initialize status bar first
-            self.statusBarController = [TPStatusBarController sharedController];
-            if (!self.statusBarController) {
-                NSLog(@"Failed to create status bar controller");
-                return nil;
-            }
-            self.statusBarController.delegate = self;
-            
-            // Initialize HID and button managers
-            self.hidManager = [TPHIDManager sharedManager];
-            if (!self.hidManager) {
-                NSLog(@"Failed to create HID manager");
-                return nil;
-            }
-            self.hidManager.delegate = self;
-            
-            self.buttonManager = [TPButtonManager sharedManager];
-            if (!self.buttonManager) {
-                NSLog(@"Failed to create button manager");
-                return nil;
-            }
-            self.buttonManager.delegate = self;
-            
-            _isInitialized = YES;
-        } @catch (NSException *exception) {
-            NSLog(@"Exception in TPApplication init: %@", exception);
-            return nil;
-        }
+        // Start logging immediately
+        [[TPLogger sharedLogger] startLogging];
+        [[TPLogger sharedLogger] logMessage:@"TPApplication initializing..."];
+        [self logSystemInfo];
     }
     return self;
 }
@@ -73,6 +45,8 @@
 
 - (void)cleanup {
     @try {
+        [[TPLogger sharedLogger] logMessage:@"TPApplication cleaning up..."];
+        
         if (self.eventWindow) {
             [self hideEventViewer];
             self.eventWindow = nil;
@@ -94,21 +68,159 @@
         }
         
         self.statusBarController = nil;
+        
+        [[TPLogger sharedLogger] stopLogging];
     } @catch (NSException *exception) {
         NSLog(@"Exception in cleanup: %@", exception);
     }
+}
+
+#pragma mark - Error Handling
+
+- (void)showError:(NSError *)error {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"TPMiddle Error";
+        alert.informativeText = error.localizedDescription;
+        alert.alertStyle = NSAlertStyleCritical;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Error shown to user: %@", error.localizedDescription]];
+    });
+}
+
+- (void)showPermissionError:(NSError *)error {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Permission Required";
+        alert.informativeText = [NSString stringWithFormat:@"%@\n\nPlease grant the required permissions in System Settings and try again.", error.localizedDescription];
+        alert.alertStyle = NSAlertStyleWarning;
+        [alert addButtonWithTitle:@"Open System Settings"];
+        [alert addButtonWithTitle:@"Cancel"];
+        
+        NSModalResponse response = [alert runModal];
+        if (response == NSAlertFirstButtonReturn) {
+            NSURL *prefsURL = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
+            [[NSWorkspace sharedWorkspace] openURL:prefsURL];
+        }
+        
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Permission error shown to user: %@", error.localizedDescription]];
+    });
+}
+
+#pragma mark - Status Reporting
+
+- (NSString *)applicationStatus {
+    NSMutableString *status = [NSMutableString string];
+    [status appendString:@"=== TPMiddle Status ===\n"];
+    [status appendFormat:@"Initialized: %@\n", _isInitialized ? @"Yes" : @"No"];
+    [status appendFormat:@"Debug Mode: %@\n", [TPConfig sharedConfig].debugMode ? @"Enabled" : @"Disabled"];
+    
+    if (self.hidManager) {
+        [status appendString:[self.hidManager deviceStatus]];
+    }
+    
+    [status appendString:@"===================\n"];
+    return status;
+}
+
+- (void)logSystemInfo {
+    NSProcessInfo *processInfo = [NSProcessInfo processInfo];
+    NSString *systemInfo = [NSString stringWithFormat:@"System Information:\n"
+                           "OS Version: %@\n"
+                           "Process Name: %@\n"
+                           "Process ID: %d\n"
+                           "Physical Memory: %.2f GB\n"
+                           "Number of Processors: %lu\n"
+                           "Active Processor Count: %lu\n"
+                           "Thermal State: %ld\n"
+                           "Low Power Mode Enabled: %@",
+                           processInfo.operatingSystemVersionString,
+                           processInfo.processName,
+                           processInfo.processIdentifier,
+                           processInfo.physicalMemory / (1024.0 * 1024.0 * 1024.0),
+                           (unsigned long)processInfo.processorCount,
+                           (unsigned long)processInfo.activeProcessorCount,
+                           (long)processInfo.thermalState,
+                           processInfo.lowPowerModeEnabled ? @"Yes" : @"No"];
+    
+    [[TPLogger sharedLogger] logMessage:systemInfo];
+}
+
+#pragma mark - NSApplicationDelegate
+
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    @try {
+        [[TPLogger sharedLogger] logMessage:@"Application did finish launching"];
+        
+        // Process command line arguments
+        NSArray<NSString *> *arguments = [[NSProcessInfo processInfo] arguments];
+        [[TPConfig sharedConfig] applyCommandLineArguments:arguments];
+        
+        // Initialize managers
+        self.hidManager = [TPHIDManager sharedManager];
+        if (!self.hidManager) {
+            [[TPLogger sharedLogger] logMessage:@"Failed to create HID manager"];
+            [NSApp terminate:nil];
+            return;
+        }
+        self.hidManager.delegate = self;
+        
+        self.buttonManager = [TPButtonManager sharedManager];
+        if (!self.buttonManager) {
+            [[TPLogger sharedLogger] logMessage:@"Failed to create button manager"];
+            [NSApp terminate:nil];
+            return;
+        }
+        self.buttonManager.delegate = self;
+        
+        // Initialize status bar
+        self.statusBarController = [TPStatusBarController sharedController];
+        if (!self.statusBarController) {
+            [[TPLogger sharedLogger] logMessage:@"Failed to create status bar controller"];
+            [NSApp terminate:nil];
+            return;
+        }
+        self.statusBarController.delegate = self;
+        
+        // Setup status bar UI
+        [self.statusBarController setupStatusBar];
+        
+        _isInitialized = YES;
+        [[TPLogger sharedLogger] logMessage:@"Application initialization complete"];
+        
+        // Start the application after a brief delay to ensure run loop is ready
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self start];
+        });
+    } @catch (NSException *exception) {
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in applicationDidFinishLaunching: %@", exception]];
+        [NSApp terminate:nil];
+    }
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    [[TPLogger sharedLogger] logMessage:@"Application will terminate"];
+    [self cleanup];
+}
+
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    return NO;  // Keep running even when all windows are closed
 }
 
 #pragma mark - Public Methods
 
 - (void)start {
     if (!_isInitialized) {
-        NSLog(@"TPApplication not properly initialized");
+        [[TPLogger sharedLogger] logMessage:@"TPApplication not properly initialized"];
         [NSApp terminate:nil];
         return;
     }
     
     @try {
+        [[TPLogger sharedLogger] logMessage:@"Starting application..."];
+        
         // Configure HID device matching
         [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsageMouse];
         [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsagePointer];
@@ -121,7 +233,7 @@
         
         // Start HID monitoring
         if (![self.hidManager start]) {
-            NSLog(@"Failed to start HID manager");
+            [[TPLogger sharedLogger] logMessage:@"Failed to start HID manager"];
             [NSApp terminate:nil];
             return;
         }
@@ -134,9 +246,10 @@
             });
         }
         
-        NSLog(@"TPMiddle application started successfully");
+        [[TPLogger sharedLogger] logMessage:@"TPMiddle application started successfully"];
+        [[TPLogger sharedLogger] logMessage:[self applicationStatus]];
     } @catch (NSException *exception) {
-        NSLog(@"Exception in start: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in start: %@", exception]];
         [NSApp terminate:nil];
     }
 }
@@ -149,6 +262,8 @@
             return;  // Already set up
         }
         
+        [[TPLogger sharedLogger] logMessage:@"Setting up event viewer..."];
+        
         // Create window
         self.eventWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 400)
                                                       styleMask:NSWindowStyleMaskTitled |
@@ -157,7 +272,7 @@
                                                         backing:NSBackingStoreBuffered
                                                           defer:NO];
         if (!self.eventWindow) {
-            NSLog(@"Failed to create event window");
+            [[TPLogger sharedLogger] logMessage:@"Failed to create event window"];
             return;
         }
         
@@ -166,27 +281,27 @@
         
         // Create and setup view controller
         NSBundle *mainBundle = [NSBundle mainBundle];
-        NSLog(@"Main bundle path: %@", mainBundle.bundlePath);
-        NSLog(@"Resources path: %@", [mainBundle resourcePath]);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Main bundle path: %@", mainBundle.bundlePath]];
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Resources path: %@", [mainBundle resourcePath]]];
         
         // Initialize view controller with nib
         self.eventViewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:mainBundle];
         if (!self.eventViewController.view) {
-            NSLog(@"Failed to load view from nib, trying absolute path");
+            [[TPLogger sharedLogger] logMessage:@"Failed to load view from nib, trying absolute path"];
             NSString *nibPath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"TPEventViewController"];
             self.eventViewController = [[TPEventViewController alloc] initWithNibName:nibPath bundle:mainBundle];
         }
         
         if (!self.eventViewController || !self.eventViewController.view) {
-            NSLog(@"Failed to create TPEventViewController");
+            [[TPLogger sharedLogger] logMessage:@"Failed to create TPEventViewController"];
             return;
         }
         
-        NSLog(@"Successfully created TPEventViewController");
-        NSLog(@"View outlets - movementView: %@, deltaLabel: %@, scrollLabel: %@",
-              self.eventViewController.movementView,
-              self.eventViewController.deltaLabel,
-              self.eventViewController.scrollLabel);
+        [[TPLogger sharedLogger] logMessage:@"Successfully created TPEventViewController"];
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"View outlets - movementView: %@, deltaLabel: %@, scrollLabel: %@",
+                                           self.eventViewController.movementView,
+                                           self.eventViewController.deltaLabel,
+                                           self.eventViewController.scrollLabel]];
         
         // Set window's content view controller
         self.eventWindow.contentViewController = self.eventViewController;
@@ -200,7 +315,7 @@
                                                    name:NSWindowWillCloseNotification
                                                  object:self.eventWindow];
     } @catch (NSException *exception) {
-        NSLog(@"Exception in setupEventViewer: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in setupEventViewer: %@", exception]];
     }
 }
 
@@ -228,7 +343,7 @@
         
         [self.statusBarController updateEventViewerState:YES];
     } @catch (NSException *exception) {
-        NSLog(@"Exception in showEventViewer: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in showEventViewer: %@", exception]];
     }
 }
 
@@ -244,19 +359,31 @@
         
         [self.statusBarController updateEventViewerState:NO];
     } @catch (NSException *exception) {
-        NSLog(@"Exception in hideEventViewer: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in hideEventViewer: %@", exception]];
     }
 }
 
 #pragma mark - TPHIDManagerDelegate
 
 - (void)didDetectDeviceAttached:(NSString *)deviceInfo {
-    NSLog(@"Device attached:\n%@", deviceInfo);
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Device attached:\n%@", deviceInfo]];
 }
 
 - (void)didDetectDeviceDetached:(NSString *)deviceInfo {
-    NSLog(@"Device detached:\n%@", deviceInfo);
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Device detached:\n%@", deviceInfo]];
     [self.buttonManager reset];
+}
+
+- (void)didEncounterError:(NSError *)error {
+    if ([error.domain isEqualToString:TPHIDManagerErrorDomain]) {
+        if (error.code == TPHIDManagerErrorPermissionDenied) {
+            [self showPermissionError:error];
+        } else {
+            [self showError:error];
+        }
+    } else {
+        [self showError:error];
+    }
 }
 
 - (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
@@ -286,10 +413,11 @@
         }
         
         if ([TPConfig sharedConfig].debugMode) {
-            NSLog(@"Button press - left: %d, right: %d, middle: %d", leftButton, rightButton, middleButton);
+            [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Button press - left: %d, right: %d, middle: %d",
+                                               leftButton, rightButton, middleButton]];
         }
     } @catch (NSException *exception) {
-        NSLog(@"Exception in didReceiveButtonPress: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in didReceiveButtonPress: %@", exception]];
     }
 }
 
@@ -320,10 +448,11 @@
         }
         
         if ([TPConfig sharedConfig].debugMode) {
-            NSLog(@"Movement - X: %d, Y: %d, Buttons: %02X", deltaX, deltaY, buttons);
+            [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Movement - X: %d, Y: %d, Buttons: %02X",
+                                               deltaX, deltaY, buttons]];
         }
     } @catch (NSException *exception) {
-        NSLog(@"Exception in didReceiveMovement: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in didReceiveMovement: %@", exception]];
     }
 }
 
@@ -331,7 +460,7 @@
 
 - (void)middleButtonStateChanged:(BOOL)isPressed {
     if ([TPConfig sharedConfig].debugMode) {
-        NSLog(@"Middle button %@", isPressed ? @"pressed" : @"released");
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Middle button %@", isPressed ? @"pressed" : @"released"]];
     }
 }
 
@@ -339,10 +468,11 @@
 
 - (void)statusBarControllerWillQuit {
     @try {
+        [[TPLogger sharedLogger] logMessage:@"Status bar controller will quit"];
         // Clean up before quitting
         [self cleanup];
     } @catch (NSException *exception) {
-        NSLog(@"Exception in statusBarControllerWillQuit: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in statusBarControllerWillQuit: %@", exception]];
     }
 }
 
@@ -354,7 +484,7 @@
             [self hideEventViewer];
         }
     } @catch (NSException *exception) {
-        NSLog(@"Exception in statusBarControllerDidToggleEventViewer: %@", exception);
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in statusBarControllerDidToggleEventViewer: %@", exception]];
     }
 }
 
