@@ -1,0 +1,26 @@
+{
+  "environment": "development",
+  "logging": {
+    "level": "debug",
+    "console": true,
+    "file": true,
+    "path": "logs/development.log"
+  },
+  "application": {
+    "name": "TPMiddle",
+    "version": "1.0.0",
+    "debug": true
+  },
+  "hid": {
+    "pollInterval": 100,
+    "deviceTimeout": 5000
+  },
+  "statusBar": {
+    "showIcon": true,
+    "menuItems": [
+      "preferences",
+      "deviceStatus",
+      "quit"
+    ]
+  }
+}

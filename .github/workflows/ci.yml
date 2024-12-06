@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Setup macOS
+      run: |
+        xcode-select --print-path
+        
+    - name: Build
+      run: make
+      
+    - name: Run tests
+      run: make test
+      
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: build-artifacts
+        path: |
+          build/
+          !build/**/*.o
+          
+  lint:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Run clang-format
+      run: |
+        find src -iname *.h -o -iname *.mm -o -iname *.cpp | xargs clang-format -i --style=llvm
+        git diff --exit-code
+        
+  analyze:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Run static analysis
+      run: |
+        xcodebuild analyze -project tpmiddle.xcodeproj -scheme tpmiddle -configuration Debug

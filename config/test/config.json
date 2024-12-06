@@ -1,0 +1,35 @@
+{
+  "environment": "test",
+  "logging": {
+    "level": "debug",
+    "console": true,
+    "file": true,
+    "path": "logs/test.log"
+  },
+  "application": {
+    "name": "TPMiddle",
+    "version": "1.0.0",
+    "debug": true
+  },
+  "hid": {
+    "pollInterval": 10,
+    "deviceTimeout": 1000,
+    "mockDevices": true
+  },
+  "statusBar": {
+    "showIcon": false,
+    "menuItems": [
+      "preferences",
+      "deviceStatus",
+      "quit"
+    ]
+  },
+  "testing": {
+    "mockResponses": true,
+    "coverage": true,
+    "timeouts": {
+      "default": 5000,
+      "longRunning": 10000
+    }
+  }
+}

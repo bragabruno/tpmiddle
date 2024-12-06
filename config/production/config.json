@@ -1,0 +1,26 @@
+{
+  "environment": "production",
+  "logging": {
+    "level": "error",
+    "console": false,
+    "file": true,
+    "path": "logs/production.log"
+  },
+  "application": {
+    "name": "TPMiddle",
+    "version": "1.0.0",
+    "debug": false
+  },
+  "hid": {
+    "pollInterval": 50,
+    "deviceTimeout": 3000
+  },
+  "statusBar": {
+    "showIcon": true,
+    "menuItems": [
+      "preferences",
+      "deviceStatus",
+      "quit"
+    ]
+  }
+}
