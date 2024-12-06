@@ -1,18 +1,29 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Run TPMiddle",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/tpmiddle.app/Contents/MacOS/tpmiddle",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "lldb",
-            "preLaunchTask": "build"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run TPMiddle",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/tpmiddle.app/Contents/MacOS/tpmiddle",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "preLaunchTask": "build",
+      "osx": {
+        "MIMode": "lldb"
+      }
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/brunobraga/Developer/tpmiddlemacos/tpmiddle",
+      "program": "/Users/brunobraga/Developer/tpmiddlemacos/tpmiddle/build/Debug/outDebug"
+    }
+  ]
 }
