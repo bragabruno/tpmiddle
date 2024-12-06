@@ -32,7 +32,10 @@ SOURCES = src/TPApplication.mm \
          src/infrastructure/hid/TPHIDManager.mm \
          src/infrastructure/hid/TPHIDInputHandler.mm \
          src/infrastructure/hid/TPHIDDeviceManager.mm \
-         src/infrastructure/hid/TPHIDManagerConstants.mm
+         src/infrastructure/hid/TPHIDManagerConstants.mm \
+         src/infrastructure/permissions/TPPermissionManager.mm \
+         src/infrastructure/error/TPErrorHandler.mm \
+         src/infrastructure/status/TPStatusReporter.mm
 
 # Object files
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.mm=$(BUILD_DIR)/%.o)
@@ -53,6 +56,9 @@ $(BUILD_DIR) $(BIN_DIR):
 	mkdir -p $@
 	mkdir -p $(BUILD_DIR)/unit/infrastructure
 	mkdir -p $(BUILD_DIR)/infrastructure/hid
+	mkdir -p $(BUILD_DIR)/infrastructure/permissions
+	mkdir -p $(BUILD_DIR)/infrastructure/error
+	mkdir -p $(BUILD_DIR)/infrastructure/status
 
 # Compile .mm files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.mm
