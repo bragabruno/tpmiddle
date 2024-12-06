@@ -4,6 +4,10 @@
 
 #ifdef __OBJC__
 #import <Foundation/Foundation.h>
+
+// Notification names
+extern NSString *const kTPMovementNotification;
+extern NSString *const kTPButtonNotification;
 #endif
 
 #ifdef __cplusplus

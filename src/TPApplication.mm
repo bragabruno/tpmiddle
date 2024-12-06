@@ -1,6 +1,7 @@
 #include "TPApplication.h"
 #include "TPConfig.h"
 #include "TPEventViewController.h"
+#include "TPConstants.h"
 
 #ifdef DEBUG
 #define DebugLog(format, ...) NSLog(@"%s: " format, __FUNCTION__, ##__VA_ARGS__)
@@ -201,7 +202,7 @@
 - (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
     dispatch_async(dispatch_get_main_queue(), ^{
         // Post notification for EventViewController
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"TPButtonNotification"
+        [[NSNotificationCenter defaultCenter] postNotificationName:kTPButtonNotification
                                                           object:nil
                                                         userInfo:@{
             @"left": @(leftButton),
@@ -217,7 +218,7 @@
 - (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
     dispatch_async(dispatch_get_main_queue(), ^{
         // Post notification for EventViewController
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"TPMovementNotification"
+        [[NSNotificationCenter defaultCenter] postNotificationName:kTPMovementNotification
                                                           object:nil
                                                         userInfo:@{
             @"deltaX": @(deltaX),

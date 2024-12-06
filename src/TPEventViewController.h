@@ -1,8 +1,12 @@
-#include <Cocoa/Cocoa.h>
-#include "TPButtonManager.h"
-#include "TPHIDManager.h"
+#pragma once
 
-@interface TPEventViewController : NSViewController <TPButtonManagerDelegate, TPHIDManagerDelegate>
+#ifdef __OBJC__
+
+#import <Cocoa/Cocoa.h>
+#import "TPButtonManager.h"
+#import "TPHIDManager.h"
+
+@interface TPEventViewController : NSViewController
 
 @property (weak) IBOutlet NSView *movementView;
 @property (weak) IBOutlet NSTextField *deltaLabel;
@@ -15,3 +19,5 @@
 - (void)stopMonitoring;
 
 @end
+
+#endif // __OBJC__

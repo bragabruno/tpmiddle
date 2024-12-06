@@ -1,8 +1,9 @@
 #include "TPEventViewController.h"
 #include "TPConfig.h"
 #include "TPApplication.h"
+#include "TPConstants.h"
 
-@interface TPEventViewController () <TPHIDManagerDelegate> {
+@interface TPEventViewController () {
     NSView *_centerIndicator;
     NSPoint _lastPoint;
     CGFloat _accumulatedScrollX;
@@ -37,13 +38,13 @@
     // Register for movement notifications
     [center addObserver:self
                selector:@selector(handleMovementNotification:)
-                   name:@"TPMovementNotification"
+                   name:kTPMovementNotification
                  object:nil];
     
     // Register for button notifications
     [center addObserver:self
                selector:@selector(handleButtonNotification:)
-                   name:@"TPButtonNotification"
+                   name:kTPButtonNotification
                  object:nil];
                  
     NSLog(@"TPEventViewController registered for notifications");
