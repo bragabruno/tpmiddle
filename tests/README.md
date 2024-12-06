@@ -11,6 +11,7 @@ This directory contains all test-related files for the TPMiddle application, org
 ## Testing Guidelines
 
 ### Unit Tests
+
 - Test individual components in isolation
 - Use mocks for external dependencies
 - Focus on single responsibility
@@ -18,6 +19,7 @@ This directory contains all test-related files for the TPMiddle application, org
 - Place tests in same directory structure as source code
 
 ### Integration Tests
+
 - Test interaction between components
 - Verify correct communication between modules
 - Test database interactions
@@ -25,6 +27,7 @@ This directory contains all test-related files for the TPMiddle application, org
 - Focus on component boundaries
 
 ### End-to-End Tests
+
 - Test complete user workflows
 - Verify system behavior from user perspective
 - Test UI interactions
@@ -73,6 +76,7 @@ make test-coverage
 ## Continuous Integration
 
 Tests are automatically run:
+
 - On every pull request
 - Before merging to main branch
 - On release branches
