@@ -5,7 +5,7 @@
 #import <Foundation/Foundation.h>
 #import <IOKit/hid/IOHIDManager.h>
 #import <ApplicationServices/ApplicationServices.h>
-#import "TPConstants.h"
+#import "../../common/TPConstants.h"
 
 @protocol TPHIDManagerDelegate <NSObject>
 @optional

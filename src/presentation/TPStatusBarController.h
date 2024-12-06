@@ -3,7 +3,7 @@
 #ifdef __OBJC__
 
 #import <Cocoa/Cocoa.h>
-#import "TPConfig.h"
+#import "../core/TPConfig.h"
 
 @protocol TPStatusBarControllerDelegate <NSObject>
 @optional

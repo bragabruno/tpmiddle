@@ -1,7 +1,7 @@
 #include "TPApplication.h"
 #include "TPConfig.h"
-#include "TPEventViewController.h"
-#include "TPConstants.h"
+#include "../presentation/TPEventViewController.h"
+#include "../common/TPConstants.h"
 
 @interface TPApplication () {
     BOOL _isInitialized;

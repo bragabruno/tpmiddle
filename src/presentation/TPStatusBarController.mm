@@ -1,5 +1,5 @@
 #include "TPStatusBarController.h"
-#include "TPConfig.h"
+#include "../core/TPConfig.h"
 
 #ifdef DEBUG
 #define DebugLog(format, ...) NSLog(@"%s: " format, __FUNCTION__, ##__VA_ARGS__)
