@@ -1,42 +1,94 @@
-CC = clang++
-CFLAGS = -Wall -Wextra -g -O2 -fobjc-arc -DDEBUG
-FRAMEWORKS = -framework Foundation -framework IOKit -framework AppKit -framework CoreGraphics
-OBJC_FLAGS = -x objective-c++
-IBTOOL = ibtool
+# Compiler settings
+CXX = clang++
+CXXFLAGS = -std=c++17 -Wall -Wextra -g
+OBJCXXFLAGS = $(CXXFLAGS) -framework Foundation -framework IOKit -framework AppKit -framework Cocoa -fobjc-arc
 
+# Directories
+SRC_DIR = src
+BUILD_DIR = build
+TEST_DIR = tests
+BIN_DIR = bin
+APP_DIR = tpmiddle.app
+
+# Source files (explicitly list macOS files)
+SOURCES = src/TPApplication.mm \
+         src/TPButtonManager.mm \
+         src/TPConfig.mm \
+         src/TPEventViewController.mm \
+         src/TPHIDManager.mm \
+         src/TPHIDManagerConstants.mm \
+         src/TPLogger.mm \
+         src/TPMiddleMacOS.mm \
+         src/TPStatusBarController.mm \
+         src/main.mm
+
+# Object files
+OBJECTS = $(SOURCES:$(SRC_DIR)/%.mm=$(BUILD_DIR)/%.o)
+
+# Test files
+TEST_SOURCES = $(wildcard $(TEST_DIR)/unit/**/*.mm)
+TEST_OBJECTS = $(TEST_SOURCES:$(TEST_DIR)/%.mm=$(BUILD_DIR)/%.o)
+
+# Binary names
 TARGET = tpmiddle
-SOURCES = TPApplication.mm \
-          TPConfig.mm \
-          TPHIDManager.mm \
-          TPHIDManagerConstants.mm \
-          TPButtonManager.mm \
-          TPStatusBarController.mm \
-          TPLogger.mm \
-          TPEventViewController.mm
+TEST_TARGET = test_runner
 
-OBJECTS = $(SOURCES:.mm=.o)
-XIB_FILES = TPEventViewController.xib
-NIB_FILES = $(XIB_FILES:.xib=.nib)
+# Default target
+all: app
 
-all: $(TARGET) $(NIB_FILES)
+# Create necessary directories
+$(BUILD_DIR) $(BIN_DIR):
+	mkdir -p $@
+	mkdir -p $(BUILD_DIR)/unit/infrastructure
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(TARGET) $(FRAMEWORKS)
+# Compile .mm files
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(OBJCXXFLAGS) -c $< -o $@
 
-%.o: %.mm
-	$(CC) $(CFLAGS) $(OBJC_FLAGS) -c $< -o $@
+# Link the main application
+$(BIN_DIR)/$(TARGET): $(BUILD_DIR) $(BIN_DIR) $(OBJECTS)
+	$(CXX) $(OBJECTS) $(OBJCXXFLAGS) -o $@
 
-%.nib: %.xib
-	$(IBTOOL) --compile $@ $<
+# Create the app bundle
+app: $(BIN_DIR)/$(TARGET)
+	@echo "Creating app bundle..."
+	mkdir -p $(APP_DIR)/Contents/MacOS
+	mkdir -p $(APP_DIR)/Contents/Resources
+	cp $(BIN_DIR)/$(TARGET) $(APP_DIR)/Contents/MacOS/
+	cp config/Info.plist $(APP_DIR)/Contents/
+	cp -r resources/* $(APP_DIR)/Contents/Resources/
 
+# Compile test files
+$(BUILD_DIR)/%.o: $(TEST_DIR)/%.mm
+	@mkdir -p $(dir $@)
+	$(CXX) $(OBJCXXFLAGS) -c $< -o $@
+
+# Build and run tests
+test: $(BUILD_DIR) $(BIN_DIR) $(TEST_OBJECTS) $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS))
+	$(CXX) $(TEST_OBJECTS) $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS)) $(OBJCXXFLAGS) -framework XCTest -o $(BIN_DIR)/$(TEST_TARGET)
+	./$(BIN_DIR)/$(TEST_TARGET)
+
+# Clean build files
 clean:
-	rm -f $(OBJECTS) $(TARGET) $(NIB_FILES)
+	rm -rf $(BUILD_DIR) $(BIN_DIR) $(APP_DIR)
 
-install: $(TARGET) $(NIB_FILES)
-	mkdir -p ~/Applications/$(TARGET).app/Contents/MacOS
-	mkdir -p ~/Applications/$(TARGET).app/Contents/Resources
-	cp $(TARGET) ~/Applications/$(TARGET).app/Contents/MacOS/
-	cp Info.plist ~/Applications/$(TARGET).app/Contents/
-	cp $(NIB_FILES) ~/Applications/$(TARGET).app/Contents/Resources/
+# Format source files
+format:
+	find $(SRC_DIR) $(TEST_DIR) -iname *.h -o -iname *.mm -o -iname *.cpp | xargs clang-format -i --style=llvm
 
-.PHONY: all clean install
+# Static analysis
+analyze:
+	clang-tidy $(SOURCES) -- $(OBJCXXFLAGS)
+
+# Install dependencies (for CI)
+install-deps:
+	brew install llvm
+	brew install clang-format
+	brew install clang-tidy
+
+# Run the application
+run: app
+	open $(APP_DIR)
+
+.PHONY: all clean test format analyze install-deps app run

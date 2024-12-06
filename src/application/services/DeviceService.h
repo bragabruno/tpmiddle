@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <map>
+#include <string>
 
 namespace TPMiddle {
 namespace Application {

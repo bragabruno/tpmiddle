@@ -1,0 +1,129 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set up environment
+      run: |
+        echo "Setting up build environment..."
+        sudo xcode-select --switch /Applications/Xcode.app
+        xcodebuild -version
+    
+    - name: Install dependencies
+      run: make install-deps
+    
+    - name: Code formatting check
+      run: |
+        make format
+        git diff --exit-code || (echo "Code formatting issues found. Run 'make format' locally." && exit 1)
+    
+    - name: Static analysis
+      run: make analyze
+    
+    - name: Build
+      run: make all
+    
+    - name: Run tests
+      run: make test
+    
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: tpmiddle-build
+        path: |
+          bin/tpmiddle
+          !bin/**/*.o
+    
+  package:
+    needs: build
+    runs-on: macos-latest
+    if: github.event_name == 'release'
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Download build artifacts
+      uses: actions/download-artifact@v2
+      with:
+        name: tpmiddle-build
+        path: bin/
+    
+    - name: Create app bundle
+      run: |
+        mkdir -p tpmiddle.app/Contents/MacOS
+        mkdir -p tpmiddle.app/Contents/Resources
+        cp bin/tpmiddle tpmiddle.app/Contents/MacOS/
+        cp config/Info.plist tpmiddle.app/Contents/
+        cp resources/TPEventViewController.nib tpmiddle.app/Contents/Resources/
+        
+    - name: Create DMG
+      run: |
+        hdiutil create -volname TPMiddle -srcfolder tpmiddle.app -ov -format UDZO tpmiddle.dmg
+    
+    - name: Upload Release Asset
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./tpmiddle.dmg
+        asset_name: tpmiddle.dmg
+        asset_content_type: application/x-apple-diskimage
+
+  deploy-development:
+    needs: build
+    runs-on: macos-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Download build artifacts
+      uses: actions/download-artifact@v2
+      with:
+        name: tpmiddle-build
+        path: bin/
+    
+    - name: Deploy to development
+      run: |
+        echo "Deploying to development environment..."
+        # Add development deployment steps here
+        
+  deploy-production:
+    needs: [build, package]
+    runs-on: macos-latest
+    if: github.event_name == 'release'
+    
+    steps:
+    - name: Download release artifact
+      uses: actions/download-artifact@v2
+      with:
+        name: tpmiddle-build
+        path: bin/
+    
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        # Add production deployment steps here
+
+  notify:
+    needs: [deploy-development, deploy-production]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify team
+      run: |
+        echo "Pipeline completed"
+        # Add notification steps (e.g., Slack, email) here

@@ -186,21 +186,3 @@
 }
 
 @end
-
-#pragma mark - Main Function
-
-int main(int __unused argc, const char * __unused argv[]) {
-    @autoreleasepool {
-        // Create and configure the application
-        NSApplication *app = [NSApplication sharedApplication];
-        TPApplication *tpApp = [TPApplication sharedApplication];
-        app.delegate = (id<NSApplicationDelegate>)tpApp;
-        
-        // Start the application
-        [tpApp start];
-        
-        // Run the application
-        [app run];
-    }
-    return 0;
-}
