@@ -12,12 +12,49 @@
 
 @implementation TPEventViewController
 
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        NSLog(@"TPEventViewController init");
+    }
+    return self;
+}
+
+- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
+    NSLog(@"TPEventViewController initWithNibName:%@ bundle:%@", nibNameOrNil, nibBundleOrNil);
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        NSLog(@"TPEventViewController initialized with nib");
+    }
+    return self;
+}
+
+- (void)loadView {
+    [super loadView];
+    NSLog(@"TPEventViewController loadView called");
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
+    NSLog(@"TPEventViewController viewDidLoad");
     
     // Initialize UI
     self.view.wantsLayer = YES;
     self.view.layer.backgroundColor = [NSColor windowBackgroundColor].CGColor;
+    
+    // Log outlet connections
+    NSLog(@"Checking outlet connections:");
+    NSLog(@"movementView: %@", self.movementView);
+    NSLog(@"deltaLabel: %@", self.deltaLabel);
+    NSLog(@"scrollLabel: %@", self.scrollLabel);
+    NSLog(@"leftButton: %@", self.leftButton);
+    NSLog(@"middleButton: %@", self.middleButton);
+    NSLog(@"rightButton: %@", self.rightButton);
+    
+    if (!self.movementView) {
+        NSLog(@"Error: movementView outlet not connected!");
+        return;
+    }
     
     // Setup movement view
     self.movementView.wantsLayer = YES;
@@ -64,6 +101,7 @@
 }
 
 - (void)startMonitoring {
+    NSLog(@"TPEventViewController startMonitoring");
     // Remove any existing observers first
     [self stopMonitoring];
     
@@ -90,6 +128,7 @@
 }
 
 - (void)stopMonitoring {
+    NSLog(@"TPEventViewController stopMonitoring");
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 

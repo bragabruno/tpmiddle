@@ -82,8 +82,43 @@
     self.eventWindow.releasedWhenClosed = NO;
     
     // Create and setup view controller
-    self.eventViewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:nil];
-    if (!self.eventViewController) {
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSLog(@"Main bundle path: %@", mainBundle.bundlePath);
+    NSLog(@"Resources path: %@", [mainBundle resourcePath]);
+    
+    // Try loading using NSNib directly
+    self.eventViewController = [[TPEventViewController alloc] init];
+    if (self.eventViewController) {
+        NSNib *nib = [[NSNib alloc] initWithNibNamed:@"TPEventViewController" bundle:mainBundle];
+        NSArray *topLevelObjects = nil;
+        if ([nib instantiateWithOwner:self.eventViewController topLevelObjects:&topLevelObjects]) {
+            NSLog(@"Successfully loaded nib file");
+            for (id object in topLevelObjects) {
+                if ([object isKindOfClass:[NSView class]]) {
+                    self.eventViewController.view = (NSView *)object;
+                    break;
+                }
+            }
+        } else {
+            NSLog(@"Failed to instantiate nib");
+            // Try loading from absolute path
+            NSString *nibPath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"TPEventViewController.nib"];
+            NSLog(@"Attempting to load nib from path: %@", nibPath);
+            nib = [[NSNib alloc] initWithNibNamed:nibPath bundle:mainBundle];
+            if ([nib instantiateWithOwner:self.eventViewController topLevelObjects:&topLevelObjects]) {
+                NSLog(@"Successfully loaded nib file from absolute path");
+                for (id object in topLevelObjects) {
+                    if ([object isKindOfClass:[NSView class]]) {
+                        self.eventViewController.view = (NSView *)object;
+                        break;
+                    }
+                }
+            } else {
+                NSLog(@"Failed to load nib from absolute path");
+                return;
+            }
+        }
+    } else {
         NSLog(@"Failed to create TPEventViewController");
         return;
     }

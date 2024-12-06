@@ -50,14 +50,20 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.mm
 $(BIN_DIR)/$(TARGET): $(BUILD_DIR) $(BIN_DIR) $(OBJECTS)
 	$(CXX) $(OBJECTS) $(OBJCXXFLAGS) -o $@
 
+# Compile .xib to .nib
+resources/TPEventViewController.nib: resources/TPEventViewController.xib
+	ibtool --compile $@ $<
+
 # Create the app bundle
-app: $(BIN_DIR)/$(TARGET)
+app: $(BIN_DIR)/$(TARGET) resources/TPEventViewController.nib
 	@echo "Creating app bundle..."
 	mkdir -p $(APP_DIR)/Contents/MacOS
 	mkdir -p $(APP_DIR)/Contents/Resources
 	cp $(BIN_DIR)/$(TARGET) $(APP_DIR)/Contents/MacOS/
 	cp config/Info.plist $(APP_DIR)/Contents/
 	cp -r resources/* $(APP_DIR)/Contents/Resources/
+	@echo "Compiled nib file location:"
+	@ls -l $(APP_DIR)/Contents/Resources/TPEventViewController.nib || true
 
 # Compile test files
 $(BUILD_DIR)/%.o: $(TEST_DIR)/%.mm

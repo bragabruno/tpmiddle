@@ -29,6 +29,12 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2024. All rights reserved.</string>
     
+    <!-- Main nib file and principal class -->
+    <key>NSMainNibFile</key>
+    <string>TPEventViewController</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    
     <!-- Privacy permissions -->
     <key>NSInputMonitoringUsageDescription</key>
     <string>TPMiddle needs to monitor input to enable TrackPoint middle button functionality.</string>

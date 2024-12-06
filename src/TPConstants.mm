@@ -13,6 +13,6 @@ const uint8_t kRightButtonBit = 0x02;              // Right button mask
 const uint8_t kMiddleButtonBit = 0x04;             // Middle button mask
 
 // Default configuration values
-const CGFloat kDefaultScrollSpeedMultiplier = 1.0f;
+const CGFloat kDefaultScrollSpeedMultiplier = 0.5f;
 const CGFloat kDefaultScrollAcceleration = 1.2f;
-const NSTimeInterval kDefaultMiddleButtonDelay = 0.3;
+const NSTimeInterval kDefaultMiddleButtonDelay = 0.02;
