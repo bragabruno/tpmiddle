@@ -117,10 +117,14 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
 - (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
     NSMutableArray *criteria = [NSMutableArray array];
     
-    // Add existing criteria if any
-    CFDictionaryRef existingCriteria = IOHIDManagerGetDeviceMatching(hidManager);
-    if (existingCriteria) {
-        [criteria addObject:(__bridge_transfer id)existingCriteria];
+    // Get existing devices if any
+    CFSetRef existingDevices = IOHIDManagerCopyDevices(hidManager);
+    if (existingDevices) {
+        NSArray *existingCriteria = [self getCurrentMatchingCriteria];
+        if (existingCriteria) {
+            [criteria addObjectsFromArray:existingCriteria];
+        }
+        CFRelease(existingDevices);
     }
     
     // Add new criteria
@@ -137,10 +141,14 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
 - (void)addVendorMatching:(uint32_t)vendorID {
     NSMutableArray *criteria = [NSMutableArray array];
     
-    // Add existing criteria if any
-    CFDictionaryRef existingCriteria = IOHIDManagerGetDeviceMatching(hidManager);
-    if (existingCriteria) {
-        [criteria addObject:(__bridge_transfer id)existingCriteria];
+    // Get existing devices if any
+    CFSetRef existingDevices = IOHIDManagerCopyDevices(hidManager);
+    if (existingDevices) {
+        NSArray *existingCriteria = [self getCurrentMatchingCriteria];
+        if (existingCriteria) {
+            [criteria addObjectsFromArray:existingCriteria];
+        }
+        CFRelease(existingDevices);
     }
     
     // Add new criteria
@@ -151,6 +159,35 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     // Set all criteria
     IOHIDManagerSetDeviceMatchingMultiple(hidManager, (__bridge CFArrayRef)criteria);
     NSLog(@"Added vendor matching criteria - Vendor ID: %d", vendorID);
+}
+
+- (NSArray *)getCurrentMatchingCriteria {
+    NSMutableArray *criteria = [NSMutableArray array];
+    CFSetRef devicesSet = IOHIDManagerCopyDevices(hidManager);
+    
+    if (devicesSet) {
+        NSSet *deviceSet = (__bridge_transfer NSSet *)devicesSet;
+        for (id device in deviceSet) {
+            IOHIDDeviceRef deviceRef = (__bridge IOHIDDeviceRef)device;
+            
+            NSNumber *usagePage = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDPrimaryUsagePageKey));
+            NSNumber *usage = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDPrimaryUsageKey));
+            NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDVendorIDKey));
+            
+            if (usagePage && usage) {
+                [criteria addObject:@{
+                    @(kIOHIDDeviceUsagePageKey): usagePage,
+                    @(kIOHIDDeviceUsageKey): usage
+                }];
+            } else if (vendorID) {
+                [criteria addObject:@{
+                    @(kIOHIDVendorIDKey): vendorID
+                }];
+            }
+        }
+    }
+    
+    return criteria;
 }
 
 - (void)setupHIDManager {
