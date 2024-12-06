@@ -1,4 +1,9 @@
-#include <Foundation/Foundation.h>
+#pragma once
+
+#ifdef __OBJC__
+
+#import <Foundation/Foundation.h>
+#import "TPConstants.h"
 
 // Operation modes
 typedef NS_ENUM(NSInteger, TPOperationMode) {
@@ -31,7 +36,4 @@ typedef NS_ENUM(NSInteger, TPOperationMode) {
 
 @end
 
-// Default values
-extern const CGFloat kDefaultScrollSpeedMultiplier;
-extern const CGFloat kDefaultScrollAcceleration;
-extern const NSTimeInterval kDefaultMiddleButtonDelay;
+#endif // __OBJC__

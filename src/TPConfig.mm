@@ -6,11 +6,6 @@
 #define DebugLog(format, ...)
 #endif
 
-// Default values
-const CGFloat kDefaultScrollSpeedMultiplier = 0.5;
-const CGFloat kDefaultScrollAcceleration = 1.2;
-const NSTimeInterval kDefaultMiddleButtonDelay = 0.02;
-
 // User defaults keys
 static NSString* const kDefaultsKeyNormalMode = @"NormalMode";
 static NSString* const kDefaultsKeyDebugMode = @"DebugMode";

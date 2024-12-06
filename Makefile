@@ -16,10 +16,10 @@ SOURCES = src/TPApplication.mm \
          src/TPConfig.mm \
          src/TPEventViewController.mm \
          src/TPHIDManager.mm \
-         src/TPHIDManagerConstants.mm \
          src/TPLogger.mm \
          src/TPMiddleMacOS.mm \
          src/TPStatusBarController.mm \
+         src/TPConstants.mm \
          src/main.mm
 
 # Object files

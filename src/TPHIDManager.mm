@@ -14,6 +14,7 @@
     int _pendingDeltaX;
     int _pendingDeltaY;
     NSDate *_lastMovementTime;
+    CGPoint _savedCursorPosition;  // Store cursor position for scroll mode
 }
 
 @synthesize isRunning = _isRunning;
@@ -66,6 +67,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         _pendingDeltaX = 0;
         _pendingDeltaY = 0;
         _lastMovementTime = [NSDate date];
+        _savedCursorPosition = CGPointZero;
         [self setupHIDManager];
     }
     return self;
@@ -214,6 +216,14 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
                 NSTimeInterval pressDuration = [[NSDate date] timeIntervalSinceDate:_middleButtonPressTime];
                 if (pressDuration < 0.3) { // Reduced from 0.5 to 0.3 for better responsiveness
                     _isScrollMode = !_isScrollMode;
+                    
+                    if (_isScrollMode) {
+                        // Save current cursor position when entering scroll mode
+                        CGEventRef event = CGEventCreate(NULL);
+                        _savedCursorPosition = CGEventGetLocation(event);
+                        CFRelease(event);
+                    }
+                    
                     NSLog(@"Scroll mode %@", _isScrollMode ? @"enabled" : @"disabled");
                     [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Scroll mode %@", 
                         _isScrollMode ? @"enabled" : @"disabled"]];
@@ -262,6 +272,13 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
             if (_pendingDeltaX != 0 || _pendingDeltaY != 0) {
                 NSLog(@"Scroll movement - X: %d, Y: %d", _pendingDeltaX, _pendingDeltaY);
                 [self handleScrollInput:_pendingDeltaY withHorizontal:_pendingDeltaX];
+                
+                // Keep cursor at saved position during scroll mode
+                CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+                                                             _savedCursorPosition,
+                                                             kCGMouseButtonLeft);
+                CGEventPost(kCGHIDEventTap, moveEvent);
+                CFRelease(moveEvent);
             }
         } else {
             // Normal pointer movement

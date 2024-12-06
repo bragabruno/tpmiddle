@@ -1,5 +1,10 @@
-#include <Foundation/Foundation.h>
-#include <IOKit/hid/IOHIDManager.h>
+#pragma once
+
+#ifdef __OBJC__
+
+#import <Foundation/Foundation.h>
+#import <IOKit/hid/IOHIDManager.h>
+#import "TPConstants.h"
 
 @protocol TPHIDManagerDelegate <NSObject>
 @optional
@@ -26,14 +31,4 @@
 
 @end
 
-// Constants for device identification
-extern const uint32_t kVendorIDLenovo;
-extern const uint32_t kUsagePageGenericDesktop;
-extern const uint32_t kUsagePageButton;
-extern const uint32_t kUsageMouse;
-extern const uint32_t kUsagePointer;
-
-// Button masks
-extern const uint8_t kLeftButtonBit;
-extern const uint8_t kRightButtonBit;
-extern const uint8_t kMiddleButtonBit;
+#endif // __OBJC__
