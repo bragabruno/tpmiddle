@@ -42,6 +42,10 @@
     self.leftButton.state = NSControlStateValueOff;
     self.middleButton.state = NSControlStateValueOff;
     self.rightButton.state = NSControlStateValueOff;
+    
+    // Reset accumulated values
+    _accumulatedScrollX = 0;
+    _accumulatedScrollY = 0;
 }
 
 - (void)viewDidLayout {
@@ -60,20 +64,33 @@
 }
 
 - (void)startMonitoring {
-    // Register for notifications instead of setting delegates directly
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                           selector:@selector(handleMovementNotification:)
-                                               name:@"TPMovementNotification"
-                                             object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                           selector:@selector(handleButtonNotification:)
-                                               name:@"TPButtonNotification"
-                                             object:nil];
+    // Remove any existing observers first
+    [self stopMonitoring];
+    
+    // Register for notifications
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self
+               selector:@selector(handleMovementNotification:)
+                   name:@"TPMovementNotification"
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(handleButtonNotification:)
+                   name:@"TPButtonNotification"
+                 object:nil];
+    
+    // Reset the view
+    [self centerIndicator];
+    _accumulatedScrollX = 0;
+    _accumulatedScrollY = 0;
+    self.deltaLabel.stringValue = @"X: 0, Y: 0";
+    self.scrollLabel.stringValue = @"Scroll: 0, 0";
+    self.leftButton.state = NSControlStateValueOff;
+    self.middleButton.state = NSControlStateValueOff;
+    self.rightButton.state = NSControlStateValueOff;
 }
 
 - (void)stopMonitoring {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [self centerIndicator];
 }
 
 #pragma mark - Notification Handlers
@@ -129,8 +146,8 @@
         8, 8
     );
     
-    // If middle button is pressed, update scroll accumulation
-    if (buttons & 0x04) { // Middle button mask
+    // If middle button is pressed or in scroll mode, update scroll accumulation
+    if (buttons & 0x04 || [TPHIDManager sharedManager].isScrollMode) {
         _accumulatedScrollX += deltaX;
         _accumulatedScrollY += deltaY;
         self.scrollLabel.stringValue = [NSString stringWithFormat:@"Scroll: %.0f, %.0f",

@@ -30,6 +30,7 @@
 
 static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
     if (result != kIOReturnSuccess) {
+        NSLog(@"Device matching callback failed with result: %d", result);
         return;
     }
     
@@ -39,6 +40,7 @@ static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *
 
 static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
     if (result != kIOReturnSuccess) {
+        NSLog(@"Device removal callback failed with result: %d", result);
         return;
     }
     
@@ -48,6 +50,7 @@ static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *s
 
 static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void *sender __unused, IOHIDValueRef value) {
     if (result != kIOReturnSuccess) {
+        NSLog(@"Input value callback failed with result: %d", result);
         return;
     }
     
@@ -80,6 +83,13 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     
     IOReturn result = IOHIDManagerOpen(hidManager, kIOHIDOptionsTypeNone);
     _isRunning = (result == kIOReturnSuccess);
+    
+    if (_isRunning) {
+        NSLog(@"HID Manager started successfully");
+    } else {
+        NSLog(@"Failed to start HID Manager with result: %d", result);
+    }
+    
     return _isRunning;
 }
 
@@ -88,6 +98,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     
     IOHIDManagerClose(hidManager, kIOHIDOptionsTypeNone);
     _isRunning = NO;
+    NSLog(@"HID Manager stopped");
 }
 
 - (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
@@ -96,6 +107,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         @(kIOHIDDeviceUsageKey): @(usage)
     };
     IOHIDManagerSetDeviceMatching(hidManager, (__bridge CFDictionaryRef)criteria);
+    NSLog(@"Added device matching criteria - Usage Page: %d, Usage: %d", usagePage, usage);
 }
 
 - (void)addVendorMatching:(uint32_t)vendorID {
@@ -103,16 +115,23 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         @(kIOHIDVendorIDKey): @(vendorID)
     };
     IOHIDManagerSetDeviceMatching(hidManager, (__bridge CFDictionaryRef)criteria);
+    NSLog(@"Added vendor matching criteria - Vendor ID: %d", vendorID);
 }
 
 - (void)setupHIDManager {
     hidManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+    if (!hidManager) {
+        NSLog(@"Failed to create HID Manager");
+        return;
+    }
+    NSLog(@"HID Manager created successfully");
     
     IOHIDManagerRegisterDeviceMatchingCallback(hidManager, Handle_DeviceMatchingCallback, (__bridge void *)self);
     IOHIDManagerRegisterDeviceRemovalCallback(hidManager, Handle_DeviceRemovalCallback, (__bridge void *)self);
     IOHIDManagerRegisterInputValueCallback(hidManager, Handle_IOHIDInputValueCallback, (__bridge void *)self);
     
     IOHIDManagerScheduleWithRunLoop(hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+    NSLog(@"HID Manager scheduled with run loop");
 }
 
 - (void)deviceAdded:(IOHIDDeviceRef)device {
@@ -120,6 +139,10 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         [devices addObject:(__bridge id)device];
         
         NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+        NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey));
+        NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey));
+        
+        NSLog(@"Device added - Product: %@, Vendor ID: %@, Product ID: %@", product, vendorID, productID);
         [[TPLogger sharedLogger] logDeviceEvent:product attached:YES];
         
         if ([self.delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
@@ -133,6 +156,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         [devices removeObject:(__bridge id)device];
         
         NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+        NSLog(@"Device removed - Product: %@", product);
         [[TPLogger sharedLogger] logDeviceEvent:product attached:NO];
         
         if ([self.delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
@@ -145,6 +169,8 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     IOHIDElementRef element = IOHIDValueGetElement(value);
     uint32_t usagePage = IOHIDElementGetUsagePage(element);
     uint32_t usage = IOHIDElementGetUsage(element);
+    
+    NSLog(@"Input received - Usage Page: %d, Usage: %d", usagePage, usage);
     
     if (usagePage == kHIDPage_Button) {
         [self handleButtonInput:value];
@@ -169,6 +195,8 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     uint32_t usage = IOHIDElementGetUsage(element);
     CFIndex buttonState = IOHIDValueGetIntegerValue(value);
     
+    NSLog(@"Button input - Usage: %d, State: %ld", usage, (long)buttonState);
+    
     switch (usage) {
         case 1: // Left button
             _leftButtonDown = buttonState;
@@ -180,21 +208,17 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
             if (buttonState && !_middleButtonDown) {
                 // Middle button just pressed
                 _middleButtonPressTime = [NSDate date];
-                _middleButtonDown = YES;
             } else if (!buttonState && _middleButtonDown) {
                 // Middle button just released
                 NSTimeInterval pressDuration = [[NSDate date] timeIntervalSinceDate:_middleButtonPressTime];
-                if (pressDuration < 0.3) { // Reduced from 0.5 to 0.3 for better responsiveness
+                if (pressDuration < 0.5) { // Toggle only on quick press
                     _isScrollMode = !_isScrollMode;
+                    NSLog(@"Scroll mode %@", _isScrollMode ? @"enabled" : @"disabled");
                     [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Scroll mode %@", 
                         _isScrollMode ? @"enabled" : @"disabled"]];
-                    
-                    // Reset pending movements when toggling scroll mode
-                    _pendingDeltaX = 0;
-                    _pendingDeltaY = 0;
                 }
-                _middleButtonDown = NO;
             }
+            _middleButtonDown = buttonState;
             break;
         default:
             break;
@@ -227,14 +251,16 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
                          (_rightButtonDown ? kRightButtonBit : 0) | 
                          (_middleButtonDown ? kMiddleButtonBit : 0);
         
-        if (_isScrollMode) {
+        if (_isScrollMode && !_middleButtonDown) {
             // In scroll mode, convert movement to scroll events
             if (_pendingDeltaX != 0 || _pendingDeltaY != 0) {
+                NSLog(@"Scroll movement - X: %d, Y: %d", _pendingDeltaX, _pendingDeltaY);
                 [self handleScrollInput:_pendingDeltaY withHorizontal:_pendingDeltaX];
             }
         } else {
             // Normal pointer movement
             if (_pendingDeltaX != 0 || _pendingDeltaY != 0) {
+                NSLog(@"Pointer movement - X: %d, Y: %d, Buttons: %02X", _pendingDeltaX, _pendingDeltaY, buttons);
                 [[TPLogger sharedLogger] logTrackpointMovement:_pendingDeltaX deltaY:_pendingDeltaY buttons:buttons];
                 
                 if ([self.delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {

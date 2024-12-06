@@ -47,8 +47,27 @@
         
         // Create event viewer window
         [self setupEventViewer];
+        
+        // Register global shortcut
+        [self registerGlobalShortcut];
     }
     return self;
+}
+
+- (void)registerGlobalShortcut {
+    NSEventMask eventMask = NSEventMaskKeyDown;
+    [NSEvent addGlobalMonitorForEventsMatchingMask:eventMask handler:^(NSEvent *event) {
+        if (([event modifierFlags] & NSEventModifierFlagCommand) && 
+            [[event charactersIgnoringModifiers] isEqualToString:@"e"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (self.eventWindow.isVisible) {
+                    [self hideEventViewer];
+                } else {
+                    [self showEventViewer];
+                }
+            });
+        }
+    }];
 }
 
 - (void)setupEventViewer {
@@ -64,6 +83,12 @@
     
     // Create and setup view controller
     self.eventViewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:nil];
+    if (!self.eventViewController) {
+        NSLog(@"Failed to create TPEventViewController");
+        return;
+    }
+    
+    // Set window's content view controller
     self.eventWindow.contentViewController = self.eventViewController;
     
     // Center window on screen
@@ -84,8 +109,12 @@
 }
 
 - (void)showEventViewer {
+    if (!self.eventWindow || !self.eventViewController) {
+        [self setupEventViewer];
+    }
     [self.eventViewController startMonitoring];
     [self.eventWindow makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
     [self.statusBarController updateEventViewerState:YES];
 }
 
@@ -101,11 +130,16 @@
     // Configure HID device matching
     [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsageMouse];
     [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsagePointer];
-    [self.hidManager addVendorMatching:kVendorIDLenovo];
+    
+    // Add multiple vendor IDs for broader device support
+    [self.hidManager addVendorMatching:kVendorIDLenovo];  // Lenovo
+    [self.hidManager addVendorMatching:0x04B3];  // IBM
+    [self.hidManager addVendorMatching:0x0451];  // Texas Instruments (some trackpoint controllers)
+    [self.hidManager addVendorMatching:0x046D];  // Logitech (some external keyboards with trackpoint)
     
     // Start HID monitoring
     if (![self.hidManager start]) {
-        DebugLog(@"Failed to start HID manager");
+        NSLog(@"Failed to start HID manager");
         [NSApp terminate:nil];
         return;
     }
@@ -115,49 +149,53 @@
         [self showEventViewer];
     }
     
-    DebugLog(@"TPMiddle application started successfully");
+    NSLog(@"TPMiddle application started successfully");
 }
 
 #pragma mark - TPHIDManagerDelegate
 
 - (void)didDetectDeviceAttached:(NSString *)deviceInfo {
-    DebugLog(@"Device attached:\n%@", deviceInfo);
+    NSLog(@"Device attached:\n%@", deviceInfo);
 }
 
 - (void)didDetectDeviceDetached:(NSString *)deviceInfo {
-    DebugLog(@"Device detached:\n%@", deviceInfo);
+    NSLog(@"Device detached:\n%@", deviceInfo);
     [self.buttonManager reset];
 }
 
 - (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
-    // Post notification for EventViewController
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"TPButtonNotification"
-                                                      object:nil
-                                                    userInfo:@{
-        @"left": @(leftButton),
-        @"right": @(rightButton),
-        @"middle": @(middleButton)
-    }];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Post notification for EventViewController
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"TPButtonNotification"
+                                                          object:nil
+                                                        userInfo:@{
+            @"left": @(leftButton),
+            @"right": @(rightButton),
+            @"middle": @(middleButton)
+        }];
+    });
     
     // Forward to button manager
     [self.buttonManager updateButtonStates:leftButton right:rightButton middle:middleButton];
 }
 
 - (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
-    // Post notification for EventViewController
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"TPMovementNotification"
-                                                      object:nil
-                                                    userInfo:@{
-        @"deltaX": @(deltaX),
-        @"deltaY": @(deltaY),
-        @"buttons": @(buttons)
-    }];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Post notification for EventViewController
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"TPMovementNotification"
+                                                          object:nil
+                                                        userInfo:@{
+            @"deltaX": @(deltaX),
+            @"deltaY": @(deltaY),
+            @"buttons": @(buttons)
+        }];
+    });
     
     // Forward movement data to button manager for scroll processing
     [self.buttonManager handleMovement:deltaX deltaY:deltaY withButtonState:buttons];
     
     if ([TPConfig sharedConfig].debugMode) {
-        DebugLog(@"Movement - X: %d, Y: %d, Buttons: %02X", deltaX, deltaY, buttons);
+        NSLog(@"Movement - X: %d, Y: %d, Buttons: %02X", deltaX, deltaY, buttons);
     }
 }
 
@@ -165,7 +203,7 @@
 
 - (void)middleButtonStateChanged:(BOOL)isPressed {
     if ([TPConfig sharedConfig].debugMode) {
-        DebugLog(@"Middle button %@", isPressed ? @"pressed" : @"released");
+        NSLog(@"Middle button %@", isPressed ? @"pressed" : @"released");
     }
 }
 
