@@ -1,7 +1,7 @@
 #ifndef TPMIDDLE_MACOS_H
 #define TPMIDDLE_MACOS_H
 
-#import <Cocoa/Cocoa.h>
+#include <Cocoa/Cocoa.h>
 
 namespace TPMiddle {
 

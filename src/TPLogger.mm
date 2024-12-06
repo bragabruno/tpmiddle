@@ -1,5 +1,5 @@
-#import "TPLogger.h"
-#import "TPConfig.h"
+#include "TPLogger.h"
+#include "TPConfig.h"
 
 @interface TPLogger () {
     NSFileHandle *_logFile;

@@ -1,6 +1,6 @@
-#import "TPApplication.h"
-#import "TPConfig.h"
-#import "TPEventViewController.h"
+#include "TPApplication.h"
+#include "TPConfig.h"
+#include "TPEventViewController.h"
 
 #ifdef DEBUG
 #define DebugLog(format, ...) NSLog(@"%s: " format, __FUNCTION__, ##__VA_ARGS__)

@@ -1,7 +1,7 @@
-#import <Cocoa/Cocoa.h>
-#import "TPHIDManager.h"
-#import "TPButtonManager.h"
-#import "TPStatusBarController.h"
+#include <Cocoa/Cocoa.h>
+#include "TPHIDManager.h"
+#include "TPButtonManager.h"
+#include "TPStatusBarController.h"
 
 @interface TPApplication : NSObject <NSApplicationDelegate, TPHIDManagerDelegate, TPButtonManagerDelegate, TPStatusBarControllerDelegate>
 

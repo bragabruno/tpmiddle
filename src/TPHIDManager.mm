@@ -1,6 +1,6 @@
-#import "TPHIDManager.h"
-#import "TPLogger.h"
-#import <CoreGraphics/CoreGraphics.h>
+#include "TPHIDManager.h"
+#include "TPLogger.h"
+#include <CoreGraphics/CoreGraphics.h>
 
 @implementation TPHIDManager {
     IOHIDManagerRef hidManager;

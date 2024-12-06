@@ -1,4 +1,4 @@
-#import <XCTest/XCTest.h>
+#include <XCTest/XCTest.h>
 #include "../../../src/infrastructure/persistence/HIDDevice.h"
 
 using namespace TPMiddle::Infrastructure;

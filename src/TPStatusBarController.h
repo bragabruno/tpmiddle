@@ -1,6 +1,6 @@
-#import <Foundation/Foundation.h>
-#import <AppKit/AppKit.h>
-#import "TPConfig.h"
+#include <Foundation/Foundation.h>
+#include <AppKit/AppKit.h>
+#include "TPConfig.h"
 
 @protocol TPStatusBarControllerDelegate <NSObject>
 @optional

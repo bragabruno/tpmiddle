@@ -1,6 +1,6 @@
-#import <Cocoa/Cocoa.h>
-#import "TPButtonManager.h"
-#import "TPHIDManager.h"
+#include <Cocoa/Cocoa.h>
+#include "TPButtonManager.h"
+#include "TPHIDManager.h"
 
 @interface TPEventViewController : NSViewController <TPButtonManagerDelegate, TPHIDManagerDelegate>
 

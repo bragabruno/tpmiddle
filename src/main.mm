@@ -1,4 +1,4 @@
-#import <Cocoa/Cocoa.h>
+#include <Cocoa/Cocoa.h>
 #include "TPMiddleMacOS.h"
 #include <memory>
 #include <iostream>

@@ -1,4 +1,4 @@
-#import <Cocoa/Cocoa.h>
+#include <Cocoa/Cocoa.h>
 #include "TPApplication.h"
 #include "TPHIDManager.h"
 #include "TPStatusBarController.h"

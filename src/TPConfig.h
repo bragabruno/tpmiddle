@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.h>
+#include <Foundation/Foundation.h>
 
 // Operation modes
 typedef NS_ENUM(NSInteger, TPOperationMode) {

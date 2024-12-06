@@ -1,4 +1,4 @@
-#import "TPHIDManager.h"
+#include "TPHIDManager.h"
 
 // Constants for device identification
 const uint32_t kVendorIDLenovo = 0x17EF;  // Lenovo vendor ID

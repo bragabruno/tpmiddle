@@ -1,5 +1,5 @@
-#import <Foundation/Foundation.h>
-#import <IOKit/hid/IOHIDManager.h>
+#include <Foundation/Foundation.h>
+#include <IOKit/hid/IOHIDManager.h>
 
 @protocol TPHIDManagerDelegate <NSObject>
 @optional

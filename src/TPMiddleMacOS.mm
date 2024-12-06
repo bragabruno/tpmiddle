@@ -1,8 +1,8 @@
-#import "TPMiddleMacOS.h"
-#import "TPStatusBarController.h"
-#import "TPHIDManager.h"
-#import "TPConfig.h"
-#import "TPLogger.h"
+#include "TPMiddleMacOS.h"
+#include "TPStatusBarController.h"
+#include "TPHIDManager.h"
+#include "TPConfig.h"
+#include "TPLogger.h"
 
 namespace TPMiddle {
 

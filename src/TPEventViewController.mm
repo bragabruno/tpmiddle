@@ -1,6 +1,6 @@
-#import "TPEventViewController.h"
-#import "TPConfig.h"
-#import "TPApplication.h"
+#include "TPEventViewController.h"
+#include "TPConfig.h"
+#include "TPApplication.h"
 
 @interface TPEventViewController () {
     NSView *_centerIndicator;

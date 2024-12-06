@@ -1,7 +1,7 @@
-#import "TPButtonManager.h"
-#import "TPConfig.h"
-#import "TPLogger.h"
-#import <AppKit/AppKit.h>
+#include "TPButtonManager.h"
+#include "TPConfig.h"
+#include "TPLogger.h"
+#include <AppKit/AppKit.h>
 
 #ifdef DEBUG
 #define DebugLog(format, ...) NSLog(@"%s: " format, __FUNCTION__, ##__VA_ARGS__)
