@@ -87,42 +87,24 @@
     NSLog(@"Main bundle path: %@", mainBundle.bundlePath);
     NSLog(@"Resources path: %@", [mainBundle resourcePath]);
     
-    // Try loading using NSNib directly
-    self.eventViewController = [[TPEventViewController alloc] init];
-    if (self.eventViewController) {
-        NSNib *nib = [[NSNib alloc] initWithNibNamed:@"TPEventViewController" bundle:mainBundle];
-        NSArray *topLevelObjects = nil;
-        if ([nib instantiateWithOwner:self.eventViewController topLevelObjects:&topLevelObjects]) {
-            NSLog(@"Successfully loaded nib file");
-            for (id object in topLevelObjects) {
-                if ([object isKindOfClass:[NSView class]]) {
-                    self.eventViewController.view = (NSView *)object;
-                    break;
-                }
-            }
-        } else {
-            NSLog(@"Failed to instantiate nib");
-            // Try loading from absolute path
-            NSString *nibPath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"TPEventViewController.nib"];
-            NSLog(@"Attempting to load nib from path: %@", nibPath);
-            nib = [[NSNib alloc] initWithNibNamed:nibPath bundle:mainBundle];
-            if ([nib instantiateWithOwner:self.eventViewController topLevelObjects:&topLevelObjects]) {
-                NSLog(@"Successfully loaded nib file from absolute path");
-                for (id object in topLevelObjects) {
-                    if ([object isKindOfClass:[NSView class]]) {
-                        self.eventViewController.view = (NSView *)object;
-                        break;
-                    }
-                }
-            } else {
-                NSLog(@"Failed to load nib from absolute path");
-                return;
-            }
-        }
-    } else {
+    // Initialize view controller with nib
+    self.eventViewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:mainBundle];
+    if (!self.eventViewController.view) {
+        NSLog(@"Failed to load view from nib, trying absolute path");
+        NSString *nibPath = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"TPEventViewController"];
+        self.eventViewController = [[TPEventViewController alloc] initWithNibName:nibPath bundle:mainBundle];
+    }
+    
+    if (!self.eventViewController || !self.eventViewController.view) {
         NSLog(@"Failed to create TPEventViewController");
         return;
     }
+    
+    NSLog(@"Successfully created TPEventViewController");
+    NSLog(@"View outlets - movementView: %@, deltaLabel: %@, scrollLabel: %@",
+          self.eventViewController.movementView,
+          self.eventViewController.deltaLabel,
+          self.eventViewController.scrollLabel);
     
     // Set window's content view controller
     self.eventWindow.contentViewController = self.eventViewController;
@@ -200,8 +182,11 @@
 }
 
 - (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // Post notification for EventViewController
+    // Forward to button manager first
+    [self.buttonManager updateButtonStates:leftButton right:rightButton middle:middleButton];
+    
+    // Then post notification on main thread
+    if ([NSThread isMainThread]) {
         [[NSNotificationCenter defaultCenter] postNotificationName:kTPButtonNotification
                                                           object:nil
                                                         userInfo:@{
@@ -209,15 +194,29 @@
             @"right": @(rightButton),
             @"middle": @(middleButton)
         }];
-    });
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter] postNotificationName:kTPButtonNotification
+                                                              object:nil
+                                                            userInfo:@{
+                @"left": @(leftButton),
+                @"right": @(rightButton),
+                @"middle": @(middleButton)
+            }];
+        });
+    }
     
-    // Forward to button manager
-    [self.buttonManager updateButtonStates:leftButton right:rightButton middle:middleButton];
+    if ([TPConfig sharedConfig].debugMode) {
+        NSLog(@"Button press - left: %d, right: %d, middle: %d", leftButton, rightButton, middleButton);
+    }
 }
 
 - (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // Post notification for EventViewController
+    // Forward movement data to button manager first
+    [self.buttonManager handleMovement:deltaX deltaY:deltaY withButtonState:buttons];
+    
+    // Then post notification on main thread
+    if ([NSThread isMainThread]) {
         [[NSNotificationCenter defaultCenter] postNotificationName:kTPMovementNotification
                                                           object:nil
                                                         userInfo:@{
@@ -225,10 +224,17 @@
             @"deltaY": @(deltaY),
             @"buttons": @(buttons)
         }];
-    });
-    
-    // Forward movement data to button manager for scroll processing
-    [self.buttonManager handleMovement:deltaX deltaY:deltaY withButtonState:buttons];
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter] postNotificationName:kTPMovementNotification
+                                                              object:nil
+                                                            userInfo:@{
+                @"deltaX": @(deltaX),
+                @"deltaY": @(deltaY),
+                @"buttons": @(buttons)
+            }];
+        });
+    }
     
     if ([TPConfig sharedConfig].debugMode) {
         NSLog(@"Movement - X: %d, Y: %d, Buttons: %02X", deltaX, deltaY, buttons);

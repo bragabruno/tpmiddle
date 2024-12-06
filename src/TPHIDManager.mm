@@ -36,7 +36,9 @@ static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *
     }
     
     TPHIDManager *manager = (__bridge TPHIDManager *)context;
-    [manager deviceAdded:device];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [manager deviceAdded:device];
+    });
 }
 
 static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
@@ -46,7 +48,9 @@ static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *s
     }
     
     TPHIDManager *manager = (__bridge TPHIDManager *)context;
-    [manager deviceRemoved:device];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [manager deviceRemoved:device];
+    });
 }
 
 static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void *sender __unused, IOHIDValueRef value) {
@@ -56,7 +60,14 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     }
     
     TPHIDManager *manager = (__bridge TPHIDManager *)context;
-    [manager handleInput:value];
+    IOHIDElementRef element = IOHIDValueGetElement(value);
+    uint32_t usagePage = IOHIDElementGetUsagePage(element);
+    uint32_t usage = IOHIDElementGetUsage(element);
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"Input received on main thread - Usage Page: %d, Usage: %d", usagePage, usage);
+        [manager handleInput:value];
+    });
 }
 
 - (instancetype)init {
@@ -104,19 +115,41 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
 }
 
 - (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
-    NSDictionary *criteria = @{
+    NSMutableArray *criteria = [NSMutableArray array];
+    
+    // Add existing criteria if any
+    CFDictionaryRef existingCriteria = IOHIDManagerGetDeviceMatching(hidManager);
+    if (existingCriteria) {
+        [criteria addObject:(__bridge_transfer id)existingCriteria];
+    }
+    
+    // Add new criteria
+    [criteria addObject:@{
         @(kIOHIDDeviceUsagePageKey): @(usagePage),
         @(kIOHIDDeviceUsageKey): @(usage)
-    };
-    IOHIDManagerSetDeviceMatching(hidManager, (__bridge CFDictionaryRef)criteria);
+    }];
+    
+    // Set all criteria
+    IOHIDManagerSetDeviceMatchingMultiple(hidManager, (__bridge CFArrayRef)criteria);
     NSLog(@"Added device matching criteria - Usage Page: %d, Usage: %d", usagePage, usage);
 }
 
 - (void)addVendorMatching:(uint32_t)vendorID {
-    NSDictionary *criteria = @{
+    NSMutableArray *criteria = [NSMutableArray array];
+    
+    // Add existing criteria if any
+    CFDictionaryRef existingCriteria = IOHIDManagerGetDeviceMatching(hidManager);
+    if (existingCriteria) {
+        [criteria addObject:(__bridge_transfer id)existingCriteria];
+    }
+    
+    // Add new criteria
+    [criteria addObject:@{
         @(kIOHIDVendorIDKey): @(vendorID)
-    };
-    IOHIDManagerSetDeviceMatching(hidManager, (__bridge CFDictionaryRef)criteria);
+    }];
+    
+    // Set all criteria
+    IOHIDManagerSetDeviceMatchingMultiple(hidManager, (__bridge CFArrayRef)criteria);
     NSLog(@"Added vendor matching criteria - Vendor ID: %d", vendorID);
 }
 
@@ -172,7 +205,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     uint32_t usagePage = IOHIDElementGetUsagePage(element);
     uint32_t usage = IOHIDElementGetUsage(element);
     
-    NSLog(@"Input received - Usage Page: %d, Usage: %d", usagePage, usage);
+    NSLog(@"Processing input on main thread - Usage Page: %d, Usage: %d", usagePage, usage);
     
     if (usagePage == kHIDPage_Button) {
         [self handleButtonInput:value];
@@ -243,7 +276,11 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     [[TPLogger sharedLogger] logButtonEvent:_leftButtonDown right:_rightButtonDown middle:_middleButtonDown];
     
     if ([self.delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
+        NSLog(@"Forwarding button press to delegate - left: %d, right: %d, middle: %d",
+              _leftButtonDown, _rightButtonDown, _middleButtonDown);
         [self.delegate didReceiveButtonPress:_leftButtonDown right:_rightButtonDown middle:_middleButtonDown];
+    } else {
+        NSLog(@"No delegate to receive button press");
     }
 }
 
@@ -287,7 +324,11 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
                 [[TPLogger sharedLogger] logTrackpointMovement:_pendingDeltaX deltaY:_pendingDeltaY buttons:buttons];
                 
                 if ([self.delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
+                    NSLog(@"Forwarding movement to delegate - X: %d, Y: %d, Buttons: %02X",
+                          _pendingDeltaX, _pendingDeltaY, buttons);
                     [self.delegate didReceiveMovement:_pendingDeltaX deltaY:_pendingDeltaY withButtonState:buttons];
+                } else {
+                    NSLog(@"No delegate to receive movement");
                 }
             }
         }

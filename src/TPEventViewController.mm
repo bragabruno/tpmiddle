@@ -47,10 +47,12 @@
                    name:kTPButtonNotification
                  object:nil];
                  
-    NSLog(@"TPEventViewController registered for notifications");
+    NSLog(@"TPEventViewController registered for notifications: %@ and %@", 
+          kTPMovementNotification, kTPButtonNotification);
 }
 
 - (void)dealloc {
+    NSLog(@"TPEventViewController dealloc - removing notification observers");
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -146,6 +148,8 @@
 #pragma mark - Notification Handlers
 
 - (void)handleMovementNotification:(NSNotification *)notification {
+    NSLog(@"Received movement notification: %@", notification);
+    
     NSDictionary *info = notification.userInfo;
     int deltaX = [info[@"deltaX"] intValue];
     int deltaY = [info[@"deltaY"] intValue];
@@ -208,6 +212,8 @@
 }
 
 - (void)handleButtonNotification:(NSNotification *)notification {
+    NSLog(@"Received button notification: %@", notification);
+    
     NSDictionary *info = notification.userInfo;
     BOOL left = [info[@"left"] boolValue];
     BOOL right = [info[@"right"] boolValue];
