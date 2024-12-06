@@ -3,6 +3,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <IOKit/hid/IOHIDKeys.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <AppKit/AppKit.h>
 
 // Forward declarations for callbacks
 static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *sender, IOHIDDeviceRef device);
@@ -14,6 +15,8 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     NSMutableArray *_devices;
     NSMutableArray *_matchingCriteria;
     BOOL _isRunning;
+    BOOL _isInitialized;
+    BOOL _waitingForPermissions;
 }
 @end
 
@@ -27,7 +30,8 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         _devices = [[NSMutableArray alloc] init];
         _matchingCriteria = [[NSMutableArray alloc] init];
         _isRunning = NO;
-        [self setupHIDManager];
+        _isInitialized = NO;
+        _waitingForPermissions = NO;
     }
     return self;
 }
@@ -36,20 +40,39 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     [self stop];
 }
 
-- (void)setupHIDManager {
-    _hidManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-    if (!_hidManager) {
-        NSLog(@"Failed to create HID Manager");
-        return;
-    }
-    NSLog(@"HID Manager created successfully");
-    
-    IOHIDManagerRegisterDeviceMatchingCallback(_hidManager, Handle_DeviceMatchingCallback, (__bridge void *)self);
-    IOHIDManagerRegisterDeviceRemovalCallback(_hidManager, Handle_DeviceRemovalCallback, (__bridge void *)self);
-    IOHIDManagerRegisterInputValueCallback(_hidManager, Handle_IOHIDInputValueCallback, (__bridge void *)self);
-    
-    IOHIDManagerScheduleWithRunLoop(_hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
-    NSLog(@"HID Manager scheduled with run loop");
+- (void)showPermissionAlert:(NSString *)message {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Permissions Required";
+        alert.informativeText = message;
+        [alert addButtonWithTitle:@"Open System Settings"];
+        [alert addButtonWithTitle:@"Try Again"];
+        [alert addButtonWithTitle:@"Quit"];
+        
+        _waitingForPermissions = YES;
+        NSModalResponse response = [alert runModal];
+        _waitingForPermissions = NO;
+        
+        if (response == NSAlertFirstButtonReturn) {
+            // Open System Settings
+            if ([message containsString:@"Accessibility"]) {
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
+            } else if ([message containsString:@"Input Monitoring"]) {
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
+            }
+            
+            // Wait a moment and try again
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self start];
+            });
+        } else if (response == NSAlertSecondButtonReturn) {
+            // Try again immediately
+            [self start];
+        } else {
+            // Quit was selected
+            [[NSApplication sharedApplication] terminate:nil];
+        }
+    });
 }
 
 - (NSError *)checkPermissions {
@@ -60,27 +83,72 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     if (!accessibilityEnabled) {
         return [NSError errorWithDomain:TPHIDManagerErrorDomain
                                  code:TPHIDManagerErrorPermissionDenied
-                             userInfo:@{NSLocalizedDescriptionKey: @"Accessibility permissions not granted"}];
+                             userInfo:@{NSLocalizedDescriptionKey: @"Accessibility permissions not granted. Please grant permission in System Settings > Privacy & Security > Accessibility"}];
     }
     
-    // Check input monitoring permissions
-    if (!CGRequestScreenCaptureAccess()) {
+    // Check input monitoring permissions by attempting to create and open a test manager
+    IOHIDManagerRef testManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+    if (!testManager) {
         return [NSError errorWithDomain:TPHIDManagerErrorDomain
                                  code:TPHIDManagerErrorPermissionDenied
-                             userInfo:@{NSLocalizedDescriptionKey: @"Input monitoring permissions not granted"}];
+                             userInfo:@{NSLocalizedDescriptionKey: @"Failed to create test HID manager"}];
+    }
+    
+    IOReturn result = IOHIDManagerOpen(testManager, kIOHIDOptionsTypeNone);
+    CFRelease(testManager);
+    
+    if (result == kIOReturnNotPermitted) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorPermissionDenied
+                             userInfo:@{NSLocalizedDescriptionKey: @"Input monitoring permissions not granted. Please grant permission in System Settings > Privacy & Security > Input Monitoring"}];
     }
     
     return nil;
 }
 
-- (NSError *)validateConfiguration {
-    if (!_hidManager) {
-        return [NSError errorWithDomain:TPHIDManagerErrorDomain
-                                 code:TPHIDManagerErrorInvalidConfiguration
-                             userInfo:@{NSLocalizedDescriptionKey: @"HID Manager not properly configured"}];
+- (BOOL)setupHIDManager {
+    if (_hidManager) {
+        return YES;
     }
     
-    // Check if any device matching criteria have been added
+    // Check permissions before creating HID manager
+    NSError *permissionError = [self checkPermissions];
+    if (permissionError) {
+        if (!_waitingForPermissions) {
+            [self showPermissionAlert:permissionError.localizedDescription];
+        }
+        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
+            [self.delegate didEncounterError:permissionError];
+        }
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Permission error: %@", permissionError.localizedDescription]];
+        return NO;
+    }
+    
+    _hidManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+    if (!_hidManager) {
+        NSLog(@"Failed to create HID Manager");
+        return NO;
+    }
+    NSLog(@"HID Manager created successfully");
+    
+    IOHIDManagerRegisterDeviceMatchingCallback(_hidManager, Handle_DeviceMatchingCallback, (__bridge void *)self);
+    IOHIDManagerRegisterDeviceRemovalCallback(_hidManager, Handle_DeviceRemovalCallback, (__bridge void *)self);
+    IOHIDManagerRegisterInputValueCallback(_hidManager, Handle_IOHIDInputValueCallback, (__bridge void *)self);
+    
+    // Apply any existing matching criteria
+    if (_matchingCriteria.count > 0) {
+        NSArray *criteriaArray = [_matchingCriteria copy];
+        IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    }
+    
+    IOHIDManagerScheduleWithRunLoop(_hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+    NSLog(@"HID Manager scheduled with run loop");
+    
+    _isInitialized = YES;
+    return YES;
+}
+
+- (NSError *)validateConfiguration {
     if (_matchingCriteria.count == 0) {
         return [NSError errorWithDomain:TPHIDManagerErrorDomain
                                  code:TPHIDManagerErrorInvalidConfiguration
@@ -91,8 +159,6 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
 }
 
 - (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
-    if (!_hidManager) return;
-    
     NSDictionary *criteria = @{
         @(kIOHIDDeviceUsagePageKey): @(usagePage),
         @(kIOHIDDeviceUsageKey): @(usage)
@@ -100,25 +166,27 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     
     [_matchingCriteria addObject:criteria];
     
-    // Update the device matching criteria
-    NSArray *criteriaArray = [_matchingCriteria copy];
-    IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    // If HID manager is already set up, update its matching criteria
+    if (_hidManager) {
+        NSArray *criteriaArray = [_matchingCriteria copy];
+        IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    }
     
-    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Added device matching criteria - Usage Page: %d, Usage: %d", usagePage, usage]];
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Added device matching criteria - Usage Page: %d Usage: %d", usagePage, usage]];
 }
 
 - (void)addVendorMatching:(uint32_t)vendorID {
-    if (!_hidManager) return;
-    
     NSDictionary *criteria = @{
         @(kIOHIDVendorIDKey): @(vendorID)
     };
     
     [_matchingCriteria addObject:criteria];
     
-    // Update the device matching criteria
-    NSArray *criteriaArray = [_matchingCriteria copy];
-    IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    // If HID manager is already set up, update its matching criteria
+    if (_hidManager) {
+        NSArray *criteriaArray = [_matchingCriteria copy];
+        IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
+    }
     
     [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Added vendor matching criteria - Vendor ID: %d", vendorID]];
 }
@@ -126,17 +194,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
 - (BOOL)start {
     if (_isRunning) return YES;
     
-    // Check permissions first
-    NSError *permissionError = [self checkPermissions];
-    if (permissionError) {
-        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
-            [self.delegate didEncounterError:permissionError];
-        }
-        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Permission error: %@", permissionError.localizedDescription]];
-        return NO;
-    }
-    
-    // Validate configuration
+    // Validate configuration first
     NSError *configError = [self validateConfiguration];
     if (configError) {
         if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
@@ -146,12 +204,22 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         return NO;
     }
     
+    // Set up HID manager if not already done
+    if (!_isInitialized && ![self setupHIDManager]) {
+        return NO;
+    }
+    
     IOReturn result = IOHIDManagerOpen(_hidManager, kIOHIDOptionsTypeNone);
     _isRunning = (result == kIOReturnSuccess);
     
     if (_isRunning) {
         [[TPLogger sharedLogger] logMessage:@"HID Manager started successfully"];
     } else {
+        if (result == kIOReturnNotPermitted && !_waitingForPermissions) {
+            [self showPermissionAlert:@"Input monitoring permissions not granted. Please grant permission in System Settings > Privacy & Security > Input Monitoring"];
+            return NO;
+        }
+        
         NSError *error = [NSError errorWithDomain:TPHIDManagerErrorDomain
                                            code:TPHIDManagerErrorDeviceAccessFailed
                                        userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to start HID Manager with result: %d", result]}];
@@ -175,6 +243,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     }
     
     _isRunning = NO;
+    _isInitialized = NO;
     [[TPLogger sharedLogger] logMessage:@"HID Manager stopped"];
 }
 

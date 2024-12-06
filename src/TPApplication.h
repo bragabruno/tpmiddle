@@ -10,10 +10,20 @@
 
 @interface TPApplication : NSObject <NSApplicationDelegate, TPHIDManagerDelegate, TPButtonManagerDelegate, TPStatusBarControllerDelegate>
 
+@property (nonatomic, assign) BOOL waitingForPermissions;
+@property (nonatomic, assign) BOOL showingPermissionAlert;
+@property (nonatomic, assign) BOOL shouldKeepRunning;
+
 + (instancetype)sharedApplication;
 - (void)start;
 - (void)cleanup;
 - (NSString *)applicationStatus;
+
+// NSApplicationDelegate methods
+- (void)applicationDidFinishLaunching:(NSNotification *)notification;
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender;
+- (void)applicationWillTerminate:(NSNotification *)notification;
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender;
 
 @end
 

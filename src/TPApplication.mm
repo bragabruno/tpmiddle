@@ -3,6 +3,8 @@
 #include "TPEventViewController.h"
 #include "TPConstants.h"
 #include "TPLogger.h"
+#include <IOKit/hid/IOHIDManager.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 @interface TPApplication () {
     BOOL _isInitialized;
@@ -13,10 +15,15 @@
 @property (strong) TPStatusBarController *statusBarController;
 @property (strong) NSWindow *eventWindow;
 @property (strong) TPEventViewController *eventViewController;
+@property (strong) NSAlert *permissionAlert;
 
 @end
 
 @implementation TPApplication
+
+@synthesize waitingForPermissions = _waitingForPermissions;
+@synthesize showingPermissionAlert = _showingPermissionAlert;
+@synthesize shouldKeepRunning = _shouldKeepRunning;
 
 + (instancetype)sharedApplication {
     static TPApplication *sharedApplication = nil;
@@ -30,6 +37,10 @@
 - (instancetype)init {
     if (self = [super init]) {
         _isInitialized = NO;
+        _waitingForPermissions = NO;
+        _showingPermissionAlert = NO;
+        _shouldKeepRunning = YES;
+        _permissionAlert = nil;
         
         // Start logging immediately
         [[TPLogger sharedLogger] startLogging];
@@ -44,6 +55,10 @@
 }
 
 - (void)cleanup {
+    if (self.waitingForPermissions || self.showingPermissionAlert) {
+        return;
+    }
+    
     @try {
         [[TPLogger sharedLogger] logMessage:@"TPApplication cleaning up..."];
         
@@ -92,17 +107,43 @@
 
 - (void)showPermissionError:(NSError *)error {
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"Permission Required";
-        alert.informativeText = [NSString stringWithFormat:@"%@\n\nPlease grant the required permissions in System Settings and try again.", error.localizedDescription];
-        alert.alertStyle = NSAlertStyleWarning;
-        [alert addButtonWithTitle:@"Open System Settings"];
-        [alert addButtonWithTitle:@"Cancel"];
+        self.waitingForPermissions = YES;
+        self.showingPermissionAlert = YES;
         
-        NSModalResponse response = [alert runModal];
+        self.permissionAlert = [[NSAlert alloc] init];
+        self.permissionAlert.messageText = @"Permission Required";
+        self.permissionAlert.informativeText = [NSString stringWithFormat:@"%@\n\nPlease grant the required permissions in System Settings and try again.", error.localizedDescription];
+        self.permissionAlert.alertStyle = NSAlertStyleWarning;
+        [self.permissionAlert addButtonWithTitle:@"Open System Settings"];
+        [self.permissionAlert addButtonWithTitle:@"Try Again"];
+        [self.permissionAlert addButtonWithTitle:@"Quit"];
+        
+        NSModalResponse response = [self.permissionAlert runModal];
+        self.permissionAlert = nil;
+        self.showingPermissionAlert = NO;
+        
         if (response == NSAlertFirstButtonReturn) {
-            NSURL *prefsURL = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
-            [[NSWorkspace sharedWorkspace] openURL:prefsURL];
+            // Open System Settings
+            if ([error.localizedDescription containsString:@"Accessibility"]) {
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
+            } else if ([error.localizedDescription containsString:@"Input Monitoring"]) {
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
+            }
+            
+            // Wait a moment and try again
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                self.waitingForPermissions = NO;
+                [self start];
+            });
+        } else if (response == NSAlertSecondButtonReturn) {
+            // Try again immediately
+            self.waitingForPermissions = NO;
+            [self start];
+        } else {
+            // Quit was selected
+            self.waitingForPermissions = NO;
+            self.shouldKeepRunning = NO;
+            [NSApp terminate:nil];
         }
         
         [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Permission error shown to user: %@", error.localizedDescription]];
@@ -158,6 +199,104 @@
         NSArray<NSString *> *arguments = [[NSProcessInfo processInfo] arguments];
         [[TPConfig sharedConfig] applyCommandLineArguments:arguments];
         
+        // Initialize status bar first
+        self.statusBarController = [TPStatusBarController sharedController];
+        if (!self.statusBarController) {
+            [[TPLogger sharedLogger] logMessage:@"Failed to create status bar controller"];
+            [NSApp terminate:nil];
+            return;
+        }
+        self.statusBarController.delegate = self;
+        
+        // Setup status bar UI
+        [self.statusBarController setupStatusBar];
+        
+        _isInitialized = YES;
+        [[TPLogger sharedLogger] logMessage:@"Application initialization complete"];
+        
+        // Check permissions before starting HID manager
+        NSError *permissionError = [self checkPermissions];
+        if (permissionError) {
+            [self showPermissionError:permissionError];
+            return;
+        }
+        
+        // Start the application after a brief delay to ensure run loop is ready
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self start];
+        });
+    } @catch (NSException *exception) {
+        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in applicationDidFinishLaunching: %@", exception]];
+        [NSApp terminate:nil];
+    }
+}
+
+- (NSError *)checkPermissions {
+    // Check accessibility permissions
+    NSDictionary *options = @{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES};
+    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    
+    if (!accessibilityEnabled) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorPermissionDenied
+                             userInfo:@{NSLocalizedDescriptionKey: @"Accessibility permissions not granted. Please grant permission in System Settings > Privacy & Security > Accessibility"}];
+    }
+    
+    // Check input monitoring permissions by attempting to create and open a test manager
+    IOHIDManagerRef testManager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+    if (!testManager) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorPermissionDenied
+                             userInfo:@{NSLocalizedDescriptionKey: @"Failed to create test HID manager"}];
+    }
+    
+    IOReturn result = IOHIDManagerOpen(testManager, kIOHIDOptionsTypeNone);
+    CFRelease(testManager);
+    
+    if (result == kIOReturnNotPermitted) {
+        return [NSError errorWithDomain:TPHIDManagerErrorDomain
+                                 code:TPHIDManagerErrorPermissionDenied
+                             userInfo:@{NSLocalizedDescriptionKey: @"Input monitoring permissions not granted. Please grant permission in System Settings > Privacy & Security > Input Monitoring"}];
+    }
+    
+    return nil;
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+    if (!self.waitingForPermissions && !self.showingPermissionAlert) {
+        [[TPLogger sharedLogger] logMessage:@"Application will terminate"];
+        [self cleanup];
+    }
+}
+
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    return NO;  // Keep running even when all windows are closed
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    if (!self.shouldKeepRunning) {
+        return NSTerminateNow;
+    }
+    
+    if (self.waitingForPermissions || self.showingPermissionAlert || self.permissionAlert != nil) {
+        return NSTerminateCancel;
+    }
+    
+    return NSTerminateNow;
+}
+
+#pragma mark - Public Methods
+
+- (void)start {
+    if (!_isInitialized) {
+        [[TPLogger sharedLogger] logMessage:@"TPApplication not properly initialized"];
+        [NSApp terminate:nil];
+        return;
+    }
+    
+    @try {
+        [[TPLogger sharedLogger] logMessage:@"Starting application..."];
+        
         // Initialize managers
         self.hidManager = [TPHIDManager sharedManager];
         if (!self.hidManager) {
@@ -175,52 +314,6 @@
         }
         self.buttonManager.delegate = self;
         
-        // Initialize status bar
-        self.statusBarController = [TPStatusBarController sharedController];
-        if (!self.statusBarController) {
-            [[TPLogger sharedLogger] logMessage:@"Failed to create status bar controller"];
-            [NSApp terminate:nil];
-            return;
-        }
-        self.statusBarController.delegate = self;
-        
-        // Setup status bar UI
-        [self.statusBarController setupStatusBar];
-        
-        _isInitialized = YES;
-        [[TPLogger sharedLogger] logMessage:@"Application initialization complete"];
-        
-        // Start the application after a brief delay to ensure run loop is ready
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self start];
-        });
-    } @catch (NSException *exception) {
-        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in applicationDidFinishLaunching: %@", exception]];
-        [NSApp terminate:nil];
-    }
-}
-
-- (void)applicationWillTerminate:(NSNotification *)notification {
-    [[TPLogger sharedLogger] logMessage:@"Application will terminate"];
-    [self cleanup];
-}
-
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
-    return NO;  // Keep running even when all windows are closed
-}
-
-#pragma mark - Public Methods
-
-- (void)start {
-    if (!_isInitialized) {
-        [[TPLogger sharedLogger] logMessage:@"TPApplication not properly initialized"];
-        [NSApp terminate:nil];
-        return;
-    }
-    
-    @try {
-        [[TPLogger sharedLogger] logMessage:@"Starting application..."];
-        
         // Configure HID device matching
         [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsageMouse];
         [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsagePointer];
@@ -233,8 +326,10 @@
         
         // Start HID monitoring
         if (![self.hidManager start]) {
-            [[TPLogger sharedLogger] logMessage:@"Failed to start HID manager"];
-            [NSApp terminate:nil];
+            if (!self.waitingForPermissions && !self.showingPermissionAlert) {
+                [[TPLogger sharedLogger] logMessage:@"Failed to start HID manager"];
+                [NSApp terminate:nil];
+            }
             return;
         }
         
@@ -250,7 +345,9 @@
         [[TPLogger sharedLogger] logMessage:[self applicationStatus]];
     } @catch (NSException *exception) {
         [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in start: %@", exception]];
-        [NSApp terminate:nil];
+        if (!self.waitingForPermissions && !self.showingPermissionAlert) {
+            [NSApp terminate:nil];
+        }
     }
 }
 
@@ -470,6 +567,7 @@
     @try {
         [[TPLogger sharedLogger] logMessage:@"Status bar controller will quit"];
         // Clean up before quitting
+        self.shouldKeepRunning = NO;
         [self cleanup];
     } @catch (NSException *exception) {
         [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in statusBarControllerWillQuit: %@", exception]];
