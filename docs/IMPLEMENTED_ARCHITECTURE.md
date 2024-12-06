@@ -5,67 +5,83 @@ This document describes the implemented clean architecture structure for the TPM
 ## Architecture Layers
 
 ### 1. Domain Layer (`src/domain/`)
+
 The core business logic layer, independent of external concerns.
 
-#### Implemented Components:
+#### Implemented Components
+
 - `models/Device.h`: Core device interface defining the contract for HID devices
 - `repositories/DeviceRepository.h`: Repository interface for device persistence
 
 Key characteristics:
+
 - Pure business logic
 - No external dependencies
 - Interface-driven design
 - Immutable domain models
 
 ### 2. Application Layer (`src/application/`)
+
 Orchestrates the flow of data and business rules.
 
-#### Implemented Components:
+#### Implemented Components
+
 - `services/DeviceService.h`: Service interface for device management operations
 
 Key characteristics:
+
 - Implements use cases
 - Coordinates between layers
 - Depends only on domain layer
 - Handles application-specific business rules
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
+
 Implements interfaces defined in the domain layer.
 
-#### Implemented Components:
+#### Implemented Components
+
 - `persistence/HIDDevice.h`: Concrete implementation of IDevice
 - `persistence/HIDDevice.mm`: macOS-specific HID device implementation
 
 Key characteristics:
+
 - Platform-specific implementations
 - External system integrations
 - Framework dependencies
 - Concrete implementations of domain interfaces
 
 ### 4. Testing Structure (`tests/`)
+
 Comprehensive testing approach across all layers.
 
-#### Implemented Components:
+#### Implemented Components
+
 - `unit/infrastructure/HIDDeviceTests.mm`: Unit tests for HID device implementation
 
 Key characteristics:
+
 - Isolated unit tests
 - Mock objects for dependencies
 - Concurrent access testing
 - Error handling verification
 
 ## Configuration Management (`config/`)
+
 Environment-specific configurations.
 
-### Implemented Configurations:
+### Implemented Configurations
+
 - Development environment (`development/config.json`)
 - Production environment (`production/config.json`)
 - Test environment (`test/config.json`)
 
 ## Continuous Integration (`.github/workflows/`)
+
 Automated build and test pipeline.
 
-### Implemented Workflows:
+### Implemented Workflows
+
 - CI pipeline (`ci.yml`)
   - Build verification
   - Test execution
