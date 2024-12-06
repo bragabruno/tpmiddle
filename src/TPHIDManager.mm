@@ -208,15 +208,21 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
             if (buttonState && !_middleButtonDown) {
                 // Middle button just pressed
                 _middleButtonPressTime = [NSDate date];
+                _middleButtonDown = YES;
             } else if (!buttonState && _middleButtonDown) {
                 // Middle button just released
                 NSTimeInterval pressDuration = [[NSDate date] timeIntervalSinceDate:_middleButtonPressTime];
-                if (pressDuration < 0.5) { // Toggle only on quick press
+                if (pressDuration < 0.3) { // Reduced from 0.5 to 0.3 for better responsiveness
                     _isScrollMode = !_isScrollMode;
                     NSLog(@"Scroll mode %@", _isScrollMode ? @"enabled" : @"disabled");
                     [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Scroll mode %@", 
                         _isScrollMode ? @"enabled" : @"disabled"]];
+                    
+                    // Reset pending movements when toggling scroll mode
+                    _pendingDeltaX = 0;
+                    _pendingDeltaY = 0;
                 }
+                _middleButtonDown = NO;
             }
             _middleButtonDown = buttonState;
             break;
