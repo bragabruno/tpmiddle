@@ -16,6 +16,7 @@
     self = [super init];
     if (self) {
         NSLog(@"TPEventViewController init");
+        [self registerForNotifications];
     }
     return self;
 }
@@ -25,8 +26,31 @@
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self) {
         NSLog(@"TPEventViewController initialized with nib");
+        [self registerForNotifications];
     }
     return self;
+}
+
+- (void)registerForNotifications {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    
+    // Register for movement notifications
+    [center addObserver:self
+               selector:@selector(handleMovementNotification:)
+                   name:@"TPMovementNotification"
+                 object:nil];
+    
+    // Register for button notifications
+    [center addObserver:self
+               selector:@selector(handleButtonNotification:)
+                   name:@"TPButtonNotification"
+                 object:nil];
+                 
+    NSLog(@"TPEventViewController registered for notifications");
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)loadView {
@@ -102,8 +126,6 @@
 
 - (void)startMonitoring {
     NSLog(@"TPEventViewController startMonitoring");
-    // Set this view controller as the delegate of TPHIDManager
-    [TPHIDManager sharedManager].delegate = self;
     
     // Reset the view
     [self centerIndicator];
@@ -118,38 +140,28 @@
 
 - (void)stopMonitoring {
     NSLog(@"TPEventViewController stopMonitoring");
-    // Remove this view controller as the delegate if it is currently the delegate
-    if ([TPHIDManager sharedManager].delegate == self) {
-        [TPHIDManager sharedManager].delegate = nil;
-    }
 }
 
-#pragma mark - TPHIDManagerDelegate Methods
+#pragma mark - Notification Handlers
 
-- (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
-    // Update delta label
-    self.deltaLabel.stringValue = [NSString stringWithFormat:@"X: %d, Y: %d", deltaX, deltaY];
-    
-    // Move indicator
-    NSRect bounds = self.movementView.bounds;
-    CGFloat baseScale = 1.0; // Base scale factor
-    
-    // Calculate movement magnitude for diagonal scaling
-    CGFloat magnitude = sqrt(deltaX * deltaX + deltaY * deltaY);
+- (void)handleMovementNotification:(NSNotification *)notification {
+    NSDictionary *info = notification.userInfo;
     int deltaX = [info[@"deltaX"] intValue];
     int deltaY = [info[@"deltaY"] intValue];
     uint8_t buttons = [info[@"buttons"] unsignedCharValue];
     
+    NSLog(@"Movement notification received - deltaX: %d, deltaY: %d, buttons: %d", deltaX, deltaY, buttons);
+    
     // Update delta label
     self.deltaLabel.stringValue = [NSString stringWithFormat:@"X: %d, Y: %d", deltaX, deltaY];
     
     // Move indicator
     NSRect bounds = self.movementView.bounds;
-    CGFloat baseScale = 1.0; // Base scale factor
+    CGFloat baseScale = 1.0;
     
     // Calculate movement magnitude for diagonal scaling
     CGFloat magnitude = sqrt(deltaX * deltaX + deltaY * deltaY);
-    CGFloat scaleFactor = baseScale * (1.0 + magnitude * 0.05); // Unified scaling based on total movement
+    CGFloat scaleFactor = baseScale * (1.0 + magnitude * 0.05);
     
     // Apply scaling uniformly to maintain direction
     CGFloat scaledDeltaX = deltaX * scaleFactor;
@@ -199,6 +211,8 @@
     BOOL left = [info[@"left"] boolValue];
     BOOL right = [info[@"right"] boolValue];
     BOOL middle = [info[@"middle"] boolValue];
+    
+    NSLog(@"Button notification received - left: %d, middle: %d, right: %d", left, middle, right);
     
     self.leftButton.state = left ? NSControlStateValueOn : NSControlStateValueOff;
     self.rightButton.state = right ? NSControlStateValueOn : NSControlStateValueOff;
