@@ -20,7 +20,6 @@ SOURCES = src/TPApplication.mm \
          src/TPEventViewController.mm \
          src/TPHIDManager.mm \
          src/TPLogger.mm \
-         src/TPMiddleMacOS.mm \
          src/TPStatusBarController.mm \
          src/TPConstants.mm \
          src/main.mm

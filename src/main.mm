@@ -1,26 +1,45 @@
 #import <Cocoa/Cocoa.h>
 #import "TPApplication.h"
 
+static void startApplicationCallback(CFRunLoopObserverRef observer, CFRunLoopActivity activity, void *info) {
+    TPApplication *appDelegate = (__bridge TPApplication *)info;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [appDelegate start];
+    });
+    CFRunLoopObserverInvalidate(observer);
+    CFRelease(observer);
+}
+
 int main(int argc __unused, const char * argv[] __unused) {
     @autoreleasepool {
         // Create NSApplication instance
-        NSApplication *app = [NSApplication sharedApplication];
+        [NSApplication sharedApplication];
         
         // Create and setup application delegate
         TPApplication *appDelegate = [TPApplication sharedApplication];
-        [app setDelegate:appDelegate];
+        [NSApp setDelegate:appDelegate];
         
         // Set activation policy for status bar app
-        [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         
-        // Finish launching
-        [app finishLaunching];
+        // Create a run loop observer to start the application after run loop is ready
+        CFRunLoopObserverContext context = {0, (__bridge void *)appDelegate, NULL, NULL, NULL};
+        CFRunLoopObserverRef observer = CFRunLoopObserverCreate(
+            kCFAllocatorDefault,
+            kCFRunLoopEntry,
+            false, // Don't repeat
+            0,
+            startApplicationCallback,
+            &context
+        );
         
-        // Start our application
-        [appDelegate start];
+        if (observer) {
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, kCFRunLoopCommonModes);
+        }
         
-        // Run the application's main event loop
-        [app run];
+        // Finish launching and run
+        [NSApp finishLaunching];
+        [NSApp run];
     }
     return 0;
 }

@@ -9,7 +9,7 @@
     CGFloat _accumulatedScrollX;
     CGFloat _accumulatedScrollY;
     BOOL _isMonitoring;
-    __weak TPHIDManager *_hidManager;  // Weak reference to HID manager
+    TPHIDManager *_hidManager;  // Changed to strong reference
 }
 @end
 
@@ -21,7 +21,7 @@
     if (self) {
         NSLog(@"TPEventViewController initialized with nib");
         _isMonitoring = NO;
-        _hidManager = [TPHIDManager sharedManager];  // Store weak reference
+        _hidManager = [TPHIDManager sharedManager];  // Store strong reference
         [self registerForNotifications];
     }
     return self;

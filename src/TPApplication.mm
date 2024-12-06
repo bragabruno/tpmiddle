@@ -126,9 +126,12 @@
             return;
         }
         
-        // Show event viewer in debug mode
+        // Initialize event viewer only if in debug mode
         if ([TPConfig sharedConfig].debugMode) {
-            [self showEventViewer];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self setupEventViewer];
+                [self showEventViewer];
+            });
         }
         
         NSLog(@"TPMiddle application started successfully");
@@ -142,6 +145,10 @@
 
 - (void)setupEventViewer {
     @try {
+        if (self.eventWindow && self.eventViewController) {
+            return;  // Already set up
+        }
+        
         // Create window
         self.eventWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 400)
                                                       styleMask:NSWindowStyleMaskTitled |
