@@ -40,27 +40,41 @@
 - (void)setupStatusBar {
     // Create status bar item
     self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
-    [self updateModeDisplay];
+    
+    // Ensure the button is created
+    if (self.statusItem.button == nil) {
+        NSLog(@"Failed to create status item button");
+        return;
+    }
+    
+    // Set initial title
+    NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
+    self.statusItem.button.title = title;
     
     // Create menu
     self.statusMenu = [self createStatusMenu];
     self.statusItem.menu = self.statusMenu;
+    
+    NSLog(@"Status bar setup completed - title: %@", title);
 }
 
 - (NSMenu *)createStatusMenu {
     NSMenu *menu = [[NSMenu alloc] init];
+    menu.autoenablesItems = NO;  // Manually control item state
     
     // Mode selection
     NSMenuItem *defaultModeItem = [[NSMenuItem alloc] initWithTitle:@"Default Mode"
                                                            action:@selector(setDefaultMode:)
                                                     keyEquivalent:@""];
     defaultModeItem.target = self;
+    defaultModeItem.enabled = YES;
     [menu addItem:defaultModeItem];
     
     NSMenuItem *normalModeItem = [[NSMenuItem alloc] initWithTitle:@"Normal Mode"
                                                           action:@selector(setNormalMode:)
                                                    keyEquivalent:@""];
     normalModeItem.target = self;
+    normalModeItem.enabled = YES;
     [menu addItem:normalModeItem];
     
     [menu addItem:[NSMenuItem separatorItem]];
@@ -70,6 +84,7 @@
                                                            action:@selector(toggleEventViewer:)
                                                     keyEquivalent:@"e"];
     eventViewerItem.target = self;
+    eventViewerItem.enabled = YES;
     [menu addItem:eventViewerItem];
     
     [menu addItem:[NSMenuItem separatorItem]];
@@ -77,6 +92,7 @@
     // Scroll settings submenu
     NSMenuItem *scrollSettingsItem = [[NSMenuItem alloc] initWithTitle:@"Scroll Settings" action:nil keyEquivalent:@""];
     NSMenu *scrollMenu = [[NSMenu alloc] init];
+    scrollMenu.autoenablesItems = NO;
     scrollSettingsItem.submenu = scrollMenu;
     
     // Natural scrolling toggle
@@ -84,6 +100,7 @@
                                                              action:@selector(toggleNaturalScrolling:)
                                                       keyEquivalent:@""];
     naturalScrollItem.target = self;
+    naturalScrollItem.enabled = YES;
     [scrollMenu addItem:naturalScrollItem];
     
     // Scroll direction settings
@@ -91,12 +108,14 @@
                                                        action:@selector(toggleHorizontalScroll:)
                                                 keyEquivalent:@""];
     invertXItem.target = self;
+    invertXItem.enabled = YES;
     [scrollMenu addItem:invertXItem];
     
     NSMenuItem *invertYItem = [[NSMenuItem alloc] initWithTitle:@"Invert Vertical"
                                                        action:@selector(toggleVerticalScroll:)
                                                 keyEquivalent:@""];
     invertYItem.target = self;
+    invertYItem.enabled = YES;
     [scrollMenu addItem:invertYItem];
     
     [scrollMenu addItem:[NSMenuItem separatorItem]];
@@ -104,6 +123,7 @@
     // Scroll speed submenu
     NSMenuItem *speedSettingsItem = [[NSMenuItem alloc] initWithTitle:@"Scroll Speed" action:nil keyEquivalent:@""];
     NSMenu *speedMenu = [[NSMenu alloc] init];
+    speedMenu.autoenablesItems = NO;
     speedSettingsItem.submenu = speedMenu;
     
     NSArray *speeds = @[@"Very Slow", @"Slow", @"Normal", @"Fast", @"Very Fast"];
@@ -113,6 +133,7 @@
                                                   keyEquivalent:@""];
         speedItem.target = self;
         speedItem.tag = (NSInteger)i;
+        speedItem.enabled = YES;
         [speedMenu addItem:speedItem];
     }
     
@@ -121,6 +142,7 @@
     // Acceleration submenu
     NSMenuItem *accelSettingsItem = [[NSMenuItem alloc] initWithTitle:@"Acceleration" action:nil keyEquivalent:@""];
     NSMenu *accelMenu = [[NSMenu alloc] init];
+    accelMenu.autoenablesItems = NO;
     accelSettingsItem.submenu = accelMenu;
     
     NSArray *accels = @[@"None", @"Light", @"Medium", @"Heavy"];
@@ -130,6 +152,7 @@
                                                   keyEquivalent:@""];
         accelItem.target = self;
         accelItem.tag = (NSInteger)i;
+        accelItem.enabled = YES;
         [accelMenu addItem:accelItem];
     }
     
@@ -143,6 +166,7 @@
                                                       action:@selector(toggleDebugMode:)
                                                keyEquivalent:@""];
     debugItem.target = self;
+    debugItem.enabled = YES;
     [menu addItem:debugItem];
     
     [menu addItem:[NSMenuItem separatorItem]];
@@ -152,6 +176,7 @@
                                                      action:@selector(quit:)
                                               keyEquivalent:@"q"];
     quitItem.target = self;
+    quitItem.enabled = YES;
     [menu addItem:quitItem];
     
     // Update initial states
@@ -164,7 +189,9 @@
 
 - (void)updateModeDisplay {
     NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
-    self.statusItem.button.title = title;
+    if (self.statusItem && self.statusItem.button) {
+        self.statusItem.button.title = title;
+    }
 }
 
 - (void)updateDebugState {
@@ -187,14 +214,18 @@
 #pragma mark - Private Methods
 
 - (void)updateMenuStates:(NSMenu *)menu {
+    if (!menu) return;
+    
     TPConfig *config = [TPConfig sharedConfig];
     
     // Update mode checkmarks
     BOOL isNormalMode = config.operationMode == TPOperationModeNormal;
     NSMenuItem *defaultModeItem = [menu itemAtIndex:0];
     NSMenuItem *normalModeItem = [menu itemAtIndex:1];
-    defaultModeItem.state = isNormalMode ? NSControlStateValueOff : NSControlStateValueOn;
-    normalModeItem.state = isNormalMode ? NSControlStateValueOn : NSControlStateValueOff;
+    if (defaultModeItem && normalModeItem) {
+        defaultModeItem.state = isNormalMode ? NSControlStateValueOff : NSControlStateValueOn;
+        normalModeItem.state = isNormalMode ? NSControlStateValueOn : NSControlStateValueOff;
+    }
     
     // Update event viewer state
     NSMenuItem *eventViewerItem = [menu itemWithTitle:_eventViewerVisible ? @"Hide Event Viewer" : @"Show Event Viewer"];
@@ -204,22 +235,28 @@
     
     // Update scroll settings
     NSMenu *scrollMenu = [[menu itemWithTitle:@"Scroll Settings"] submenu];
-    [[scrollMenu itemWithTitle:@"Natural Scrolling"] setState:config.naturalScrolling ? NSControlStateValueOn : NSControlStateValueOff];
-    [[scrollMenu itemWithTitle:@"Invert Horizontal"] setState:config.invertScrollX ? NSControlStateValueOn : NSControlStateValueOff];
-    [[scrollMenu itemWithTitle:@"Invert Vertical"] setState:config.invertScrollY ? NSControlStateValueOn : NSControlStateValueOff];
-    
-    // Update speed selection
-    NSInteger speedIndex = [self speedIndexForMultiplier:config.scrollSpeedMultiplier];
-    NSMenu *speedMenu = [[scrollMenu itemWithTitle:@"Scroll Speed"] submenu];
-    for (NSMenuItem *item in speedMenu.itemArray) {
-        item.state = (item.tag == speedIndex) ? NSControlStateValueOn : NSControlStateValueOff;
-    }
-    
-    // Update acceleration selection
-    NSInteger accelIndex = [self accelerationIndexForValue:config.scrollAcceleration];
-    NSMenu *accelMenu = [[scrollMenu itemWithTitle:@"Acceleration"] submenu];
-    for (NSMenuItem *item in accelMenu.itemArray) {
-        item.state = (item.tag == accelIndex) ? NSControlStateValueOn : NSControlStateValueOff;
+    if (scrollMenu) {
+        [[scrollMenu itemWithTitle:@"Natural Scrolling"] setState:config.naturalScrolling ? NSControlStateValueOn : NSControlStateValueOff];
+        [[scrollMenu itemWithTitle:@"Invert Horizontal"] setState:config.invertScrollX ? NSControlStateValueOn : NSControlStateValueOff];
+        [[scrollMenu itemWithTitle:@"Invert Vertical"] setState:config.invertScrollY ? NSControlStateValueOn : NSControlStateValueOff];
+        
+        // Update speed selection
+        NSInteger speedIndex = [self speedIndexForMultiplier:config.scrollSpeedMultiplier];
+        NSMenu *speedMenu = [[scrollMenu itemWithTitle:@"Scroll Speed"] submenu];
+        if (speedMenu) {
+            for (NSMenuItem *item in speedMenu.itemArray) {
+                item.state = (item.tag == speedIndex) ? NSControlStateValueOn : NSControlStateValueOff;
+            }
+        }
+        
+        // Update acceleration selection
+        NSInteger accelIndex = [self accelerationIndexForValue:config.scrollAcceleration];
+        NSMenu *accelMenu = [[scrollMenu itemWithTitle:@"Acceleration"] submenu];
+        if (accelMenu) {
+            for (NSMenuItem *item in accelMenu.itemArray) {
+                item.state = (item.tag == accelIndex) ? NSControlStateValueOn : NSControlStateValueOff;
+            }
+        }
     }
     
     // Update debug mode

@@ -13,6 +13,17 @@
 const CGFloat kMinMovementThreshold = 1.0;   // Minimum movement to trigger scroll
 const CGFloat kMaxScrollSpeed = 50.0;        // Maximum scroll speed cap
 
+static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType type, CGEventRef event, void *refcon) {
+    if (!event || !refcon) {
+        return event;
+    }
+    
+    @autoreleasepool {
+        TPButtonManager *manager = (__bridge TPButtonManager *)refcon;
+        return [manager handleEventTapEvent:type event:event];
+    }
+}
+
 @interface TPButtonManager () {
     BOOL _leftDown;
     BOOL _rightDown;
@@ -25,6 +36,10 @@ const CGFloat kMaxScrollSpeed = 50.0;        // Maximum scroll speed cap
     CGFloat _accumulatedDeltaX;
     CGFloat _accumulatedDeltaY;
     NSTimeInterval _lastScrollTime;
+    
+    // Event tap
+    CFMachPortRef _eventTap;
+    CFRunLoopSourceRef _runLoopSource;
 }
 @end
 
@@ -42,8 +57,111 @@ const CGFloat kMaxScrollSpeed = 50.0;        // Maximum scroll speed cap
 - (instancetype)init {
     if (self = [super init]) {
         [self reset];
+        [self setupEventTap];
     }
     return self;
+}
+
+- (void)dealloc {
+    [self teardownEventTap];
+}
+
+#pragma mark - Event Tap Setup
+
+- (void)setupEventTap {
+    // Create event tap
+    _eventTap = CGEventTapCreate(
+        kCGSessionEventTap,
+        kCGHeadInsertEventTap,
+        kCGEventTapOptionDefault,
+        CGEventMaskBit(kCGEventMouseMoved) |
+        CGEventMaskBit(kCGEventLeftMouseDown) |
+        CGEventMaskBit(kCGEventLeftMouseUp) |
+        CGEventMaskBit(kCGEventRightMouseDown) |
+        CGEventMaskBit(kCGEventRightMouseUp) |
+        CGEventMaskBit(kCGEventOtherMouseDown) |
+        CGEventMaskBit(kCGEventOtherMouseUp) |
+        CGEventMaskBit(kCGEventScrollWheel),
+        eventTapCallback,
+        (__bridge void *)self
+    );
+    
+    if (!_eventTap) {
+        NSLog(@"Failed to create event tap - Input Monitoring permission may be required");
+        return;
+    }
+    
+    // Create run loop source
+    _runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, _eventTap, 0);
+    if (!_runLoopSource) {
+        NSLog(@"Failed to create run loop source");
+        CFRelease(_eventTap);
+        _eventTap = NULL;
+        return;
+    }
+    
+    // Add to run loop
+    CFRunLoopAddSource(CFRunLoopGetMain(), _runLoopSource, kCFRunLoopCommonModes);
+    CGEventTapEnable(_eventTap, true);
+    
+    NSLog(@"Event tap setup successfully");
+}
+
+- (void)teardownEventTap {
+    if (_runLoopSource) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), _runLoopSource, kCFRunLoopCommonModes);
+        CFRelease(_runLoopSource);
+        _runLoopSource = NULL;
+    }
+    
+    if (_eventTap) {
+        CGEventTapEnable(_eventTap, false);
+        CFRelease(_eventTap);
+        _eventTap = NULL;
+    }
+}
+
+- (CGEventRef)handleEventTapEvent:(CGEventType)type event:(CGEventRef)event {
+    if (!event) {
+        return NULL;
+    }
+    
+    @try {
+        switch (type) {
+            case kCGEventMouseMoved:
+                if (_middlePressed || _middleEmulated) {
+                    CGPoint delta = CGEventGetLocation(event);
+                    [self handleMovement:(int)delta.x deltaY:(int)delta.y withButtonState:0];
+                    return NULL; // Consume the event
+                }
+                break;
+                
+            case kCGEventLeftMouseDown:
+                _leftDown = YES;
+                _leftDownTime = [NSDate date];
+                break;
+                
+            case kCGEventLeftMouseUp:
+                _leftDown = NO;
+                break;
+                
+            case kCGEventRightMouseDown:
+                _rightDown = YES;
+                _rightDownTime = [NSDate date];
+                break;
+                
+            case kCGEventRightMouseUp:
+                _rightDown = NO;
+                break;
+                
+            default:
+                break;
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"Exception in handleEventTapEvent: %@", exception);
+    }
+    
+    return event;
 }
 
 #pragma mark - Public Methods
@@ -182,54 +300,77 @@ const CGFloat kMaxScrollSpeed = 50.0;        // Maximum scroll speed cap
 #pragma mark - Private Methods
 
 - (void)postMiddleButtonEvent:(BOOL)isDown {
-    CGEventRef event = CGEventCreate(NULL);
-    CGPoint pos = CGEventGetLocation(event);
-    CFRelease(event);
-    
-    // Create and post middle button event
-    CGEventRef mouseEvent = CGEventCreateMouseEvent(
-        NULL,
-        isDown ? kCGEventOtherMouseDown : kCGEventOtherMouseUp,
-        pos,
-        kCGMouseButtonCenter
-    );
-    
-    CGEventPost(kCGHIDEventTap, mouseEvent);
-    CFRelease(mouseEvent);
-    
-    // Log middle button emulation
-    [[TPLogger sharedLogger] logMiddleButtonEmulation:isDown];
-    
-    // Notify delegate
-    if ([self.delegate respondsToSelector:@selector(middleButtonStateChanged:)]) {
-        [self.delegate middleButtonStateChanged:isDown];
-    }
-    
-    if ([TPConfig sharedConfig].debugMode) {
-        DebugLog(@"Posted middle button %@ event at {%f, %f}",
-                isDown ? @"down" : @"up", pos.x, pos.y);
+    @try {
+        CGEventRef event = CGEventCreate(NULL);
+        if (!event) {
+            NSLog(@"Failed to create CGEvent for getting cursor position");
+            return;
+        }
+        
+        CGPoint pos = CGEventGetLocation(event);
+        CFRelease(event);
+        
+        // Create and post middle button event
+        CGEventRef mouseEvent = CGEventCreateMouseEvent(
+            NULL,
+            isDown ? kCGEventOtherMouseDown : kCGEventOtherMouseUp,
+            pos,
+            kCGMouseButtonCenter
+        );
+        
+        if (mouseEvent) {
+            CGEventPost(kCGHIDEventTap, mouseEvent);
+            CFRelease(mouseEvent);
+            
+            // Log middle button emulation
+            [[TPLogger sharedLogger] logMiddleButtonEmulation:isDown];
+            
+            // Notify delegate
+            if ([self.delegate respondsToSelector:@selector(middleButtonStateChanged:)]) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self.delegate middleButtonStateChanged:isDown];
+                });
+            }
+            
+            if ([TPConfig sharedConfig].debugMode) {
+                DebugLog(@"Posted middle button %@ event at {%f, %f}",
+                        isDown ? @"down" : @"up", pos.x, pos.y);
+            }
+        } else {
+            NSLog(@"Failed to create mouse event");
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"Exception in postMiddleButtonEvent: %@", exception);
     }
 }
 
 - (void)postScrollEvent:(CGFloat)deltaY deltaX:(CGFloat)deltaX {
-    // Create scroll event (using pixel units for smoother scrolling)
-    CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
-        NULL,
-        kCGScrollEventUnitPixel,
-        2,  // number of axes
-        (int32_t)deltaY,
-        (int32_t)deltaX
-    );
-    
-    // Post the event
-    CGEventPost(kCGHIDEventTap, scrollEvent);
-    CFRelease(scrollEvent);
-    
-    // Log scroll event
-    [[TPLogger sharedLogger] logScrollEvent:deltaX deltaY:deltaY];
-    
-    if ([TPConfig sharedConfig].debugMode) {
-        DebugLog(@"Posted scroll event - deltaX: %.2f, deltaY: %.2f", deltaX, deltaY);
+    @try {
+        // Create scroll event (using pixel units for smoother scrolling)
+        CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
+            NULL,
+            kCGScrollEventUnitPixel,
+            2,  // number of axes
+            (int32_t)deltaY,
+            (int32_t)deltaX
+        );
+        
+        if (scrollEvent) {
+            // Post the event
+            CGEventPost(kCGHIDEventTap, scrollEvent);
+            CFRelease(scrollEvent);
+            
+            // Log scroll event
+            [[TPLogger sharedLogger] logScrollEvent:deltaX deltaY:deltaY];
+            
+            if ([TPConfig sharedConfig].debugMode) {
+                DebugLog(@"Posted scroll event - deltaX: %.2f, deltaY: %.2f", deltaX, deltaY);
+            }
+        } else {
+            NSLog(@"Failed to create scroll event");
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"Exception in postScrollEvent: %@", exception);
     }
 }
 

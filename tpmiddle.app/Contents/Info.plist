@@ -29,12 +29,6 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2024. All rights reserved.</string>
     
-    <!-- Main nib file and principal class -->
-    <key>NSMainNibFile</key>
-    <string>TPEventViewController</string>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    
     <!-- Privacy permissions -->
     <key>NSInputMonitoringUsageDescription</key>
     <string>TPMiddle needs to monitor input to enable TrackPoint middle button functionality.</string>
@@ -54,5 +48,33 @@
             <string>TPMiddle</string>
         </dict>
     </dict>
+    
+    <!-- Status Bar Support -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    
+    <!-- Event Handling Permissions -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>TPMiddle needs to handle input events to provide TrackPoint functionality.</string>
+    <key>NSAppleScriptEnabled</key>
+    <true/>
+    <key>NSSystemExtensionUsageDescription</key>
+    <string>TPMiddle needs system extension capabilities to handle input events.</string>
+    
+    <!-- Additional Required Capabilities -->
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>input-monitoring</string>
+    </array>
+    
+    <!-- Accessibility -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>TPMiddle needs accessibility access to monitor and control input events.</string>
+    
+    <!-- Screen Recording (for input monitoring) -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>TPMiddle needs input monitoring permissions to detect TrackPoint events.</string>
 </dict>
 </plist>

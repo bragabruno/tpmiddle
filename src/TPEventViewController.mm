@@ -8,25 +8,18 @@
     NSPoint _lastPoint;
     CGFloat _accumulatedScrollX;
     CGFloat _accumulatedScrollY;
+    BOOL _isMonitoring;
 }
 @end
 
 @implementation TPEventViewController
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        NSLog(@"TPEventViewController init");
-        [self registerForNotifications];
-    }
-    return self;
-}
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
     NSLog(@"TPEventViewController initWithNibName:%@ bundle:%@", nibNameOrNil, nibBundleOrNil);
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self) {
         NSLog(@"TPEventViewController initialized with nib");
+        _isMonitoring = NO;
         [self registerForNotifications];
     }
     return self;
@@ -34,6 +27,9 @@
 
 - (void)registerForNotifications {
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    
+    // Unregister first to prevent duplicates
+    [center removeObserver:self];
     
     // Register for movement notifications
     [center addObserver:self
@@ -118,6 +114,8 @@
 }
 
 - (void)centerIndicator {
+    if (!self.movementView) return;
+    
     NSRect bounds = self.movementView.bounds;
     _centerIndicator.frame = NSMakeRect(
         NSMidX(bounds) - 4,
@@ -128,7 +126,10 @@
 }
 
 - (void)startMonitoring {
+    if (_isMonitoring) return;
+    
     NSLog(@"TPEventViewController startMonitoring");
+    _isMonitoring = YES;
     
     // Reset the view
     [self centerIndicator];
@@ -142,88 +143,105 @@
 }
 
 - (void)stopMonitoring {
+    if (!_isMonitoring) return;
+    
     NSLog(@"TPEventViewController stopMonitoring");
+    _isMonitoring = NO;
 }
 
 #pragma mark - Notification Handlers
 
 - (void)handleMovementNotification:(NSNotification *)notification {
-    NSLog(@"Received movement notification: %@", notification);
+    if (!_isMonitoring) return;
     
-    NSDictionary *info = notification.userInfo;
-    int deltaX = [info[@"deltaX"] intValue];
-    int deltaY = [info[@"deltaY"] intValue];
-    uint8_t buttons = [info[@"buttons"] unsignedCharValue];
-    
-    NSLog(@"Movement notification received - deltaX: %d, deltaY: %d, buttons: %d", deltaX, deltaY, buttons);
-    
-    // Update delta label
-    self.deltaLabel.stringValue = [NSString stringWithFormat:@"X: %d, Y: %d", deltaX, deltaY];
-    
-    // Move indicator
-    NSRect bounds = self.movementView.bounds;
-    CGFloat baseScale = 1.0;
-    
-    // Calculate movement magnitude for diagonal scaling
-    CGFloat magnitude = sqrt(deltaX * deltaX + deltaY * deltaY);
-    CGFloat scaleFactor = baseScale * (1.0 + magnitude * 0.05);
-    
-    // Apply scaling uniformly to maintain direction
-    CGFloat scaledDeltaX = deltaX * scaleFactor;
-    CGFloat scaledDeltaY = deltaY * scaleFactor;
-    
-    // Get scroll configuration
-    TPConfig *config = [TPConfig sharedConfig];
-    
-    // Apply inversion if configured
-    if (config.invertScrollX) {
-        scaledDeltaX = -scaledDeltaX;
-    }
-    if (config.invertScrollY) {
-        scaledDeltaY = -scaledDeltaY;
-    }
-    
-    // Calculate new position with unified scaling
-    CGFloat newX = _lastPoint.x - scaledDeltaX;
-    CGFloat newY = _lastPoint.y - scaledDeltaY;
-    
-    // Ensure the center of the indicator stays within bounds
-    CGFloat minX = 4.0;
-    CGFloat maxX = NSWidth(bounds) - 4.0;
-    CGFloat minY = 4.0;
-    CGFloat maxY = NSHeight(bounds) - 4.0;
-    
-    _lastPoint.x = fmin(maxX, fmax(minX, newX));
-    _lastPoint.y = fmin(maxY, fmax(minY, newY));
-    
-    _centerIndicator.frame = NSMakeRect(
-        _lastPoint.x - 4,
-        _lastPoint.y - 4,
-        8, 8
-    );
-    
-    // If middle button is pressed or in scroll mode, update scroll accumulation
-    if (buttons & 0x04 || [TPHIDManager sharedManager].isScrollMode) {
-        _accumulatedScrollX += deltaX;
-        _accumulatedScrollY += deltaY;
-        self.scrollLabel.stringValue = [NSString stringWithFormat:@"Scroll: %.0f, %.0f",
-                                      _accumulatedScrollX, _accumulatedScrollY];
+    @try {
+        NSDictionary *info = notification.userInfo;
+        if (!info) return;
+        
+        int deltaX = [info[@"deltaX"] intValue];
+        int deltaY = [info[@"deltaY"] intValue];
+        uint8_t buttons = [info[@"buttons"] unsignedCharValue];
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Update delta label
+            self.deltaLabel.stringValue = [NSString stringWithFormat:@"X: %d, Y: %d", deltaX, deltaY];
+            
+            // Move indicator
+            if (self.movementView) {
+                NSRect bounds = self.movementView.bounds;
+                CGFloat baseScale = 1.0;
+                
+                // Calculate movement magnitude for diagonal scaling
+                CGFloat magnitude = sqrt(deltaX * deltaX + deltaY * deltaY);
+                CGFloat scaleFactor = baseScale * (1.0 + magnitude * 0.05);
+                
+                // Apply scaling uniformly to maintain direction
+                CGFloat scaledDeltaX = deltaX * scaleFactor;
+                CGFloat scaledDeltaY = deltaY * scaleFactor;
+                
+                // Get scroll configuration
+                TPConfig *config = [TPConfig sharedConfig];
+                
+                // Apply inversion if configured
+                if (config.invertScrollX) {
+                    scaledDeltaX = -scaledDeltaX;
+                }
+                if (config.invertScrollY) {
+                    scaledDeltaY = -scaledDeltaY;
+                }
+                
+                // Calculate new position with unified scaling
+                CGFloat newX = self->_lastPoint.x - scaledDeltaX;
+                CGFloat newY = self->_lastPoint.y - scaledDeltaY;
+                
+                // Ensure the center of the indicator stays within bounds
+                CGFloat minX = 4.0;
+                CGFloat maxX = NSWidth(bounds) - 4.0;
+                CGFloat minY = 4.0;
+                CGFloat maxY = NSHeight(bounds) - 4.0;
+                
+                self->_lastPoint.x = fmin(maxX, fmax(minX, newX));
+                self->_lastPoint.y = fmin(maxY, fmax(minY, newY));
+                
+                self->_centerIndicator.frame = NSMakeRect(
+                    self->_lastPoint.x - 4,
+                    self->_lastPoint.y - 4,
+                    8, 8
+                );
+                
+                // If middle button is pressed or in scroll mode, update scroll accumulation
+                if (buttons & 0x04 || [TPHIDManager sharedManager].isScrollMode) {
+                    self->_accumulatedScrollX += deltaX;
+                    self->_accumulatedScrollY += deltaY;
+                    self.scrollLabel.stringValue = [NSString stringWithFormat:@"Scroll: %.0f, %.0f",
+                                                  self->_accumulatedScrollX, self->_accumulatedScrollY];
+                }
+            }
+        });
+    } @catch (NSException *exception) {
+        NSLog(@"Exception in handleMovementNotification: %@", exception);
     }
 }
 
 - (void)handleButtonNotification:(NSNotification *)notification {
-    NSLog(@"Received button notification: %@", notification);
+    if (!_isMonitoring) return;
     
-    NSDictionary *info = notification.userInfo;
-    BOOL left = [info[@"left"] boolValue];
-    BOOL right = [info[@"right"] boolValue];
-    BOOL middle = [info[@"middle"] boolValue];
-    
-    NSLog(@"Button notification received - left: %d, middle: %d, right: %d", left, middle, right);
-    
-    self.leftButton.state = left ? NSControlStateValueOn : NSControlStateValueOff;
-    self.rightButton.state = right ? NSControlStateValueOn : NSControlStateValueOff;
-    self.middleButton.state = middle ? NSControlStateValueOn : NSControlStateValueOff;
+    @try {
+        NSDictionary *info = notification.userInfo;
+        if (!info) return;
+        
+        BOOL left = [info[@"left"] boolValue];
+        BOOL right = [info[@"right"] boolValue];
+        BOOL middle = [info[@"middle"] boolValue];
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.leftButton.state = left ? NSControlStateValueOn : NSControlStateValueOff;
+            self.rightButton.state = right ? NSControlStateValueOn : NSControlStateValueOff;
+            self.middleButton.state = middle ? NSControlStateValueOn : NSControlStateValueOff;
+        });
+    } @catch (NSException *exception) {
+        NSLog(@"Exception in handleButtonNotification: %@", exception);
+    }
 }
 
 @end

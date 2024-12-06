@@ -1,27 +1,26 @@
 #import <Cocoa/Cocoa.h>
 #import "TPApplication.h"
 
-int main(int argc, const char * argv[]) {
+int main(int argc __unused, const char * argv[] __unused) {
     @autoreleasepool {
-        // Create and setup NSApplication
-        NSApplication *application = [NSApplication sharedApplication];
-        [application setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        // Create NSApplication instance
+        NSApplication *app = [NSApplication sharedApplication];
         
         // Create and setup application delegate
         TPApplication *appDelegate = [TPApplication sharedApplication];
-        [application setDelegate:appDelegate];
+        [app setDelegate:appDelegate];
         
-        // Finish launching the application
-        [application finishLaunching];
+        // Set activation policy for status bar app
+        [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        
+        // Finish launching
+        [app finishLaunching];
         
         // Start our application
         [appDelegate start];
         
-        // Activate the application
-        [application activateIgnoringOtherApps:YES];
-        
-        // Run the application
-        [application run];
+        // Run the application's main event loop
+        [app run];
     }
     return 0;
 }

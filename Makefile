@@ -3,6 +3,9 @@ CXX = clang++
 CXXFLAGS = -std=c++17 -Wall -Wextra -g
 OBJCXXFLAGS = $(CXXFLAGS) -framework Foundation -framework IOKit -framework AppKit -framework Cocoa -fobjc-arc
 
+# Signing settings
+SIGN_IDENTITY = "-" # Use ad-hoc signing
+
 # Directories
 SRC_DIR = src
 BUILD_DIR = build
@@ -54,7 +57,7 @@ $(BIN_DIR)/$(TARGET): $(BUILD_DIR) $(BIN_DIR) $(OBJECTS)
 resources/TPEventViewController.nib: resources/TPEventViewController.xib
 	ibtool --compile $@ $<
 
-# Create the app bundle
+# Create and sign the app bundle
 app: $(BIN_DIR)/$(TARGET) resources/TPEventViewController.nib
 	@echo "Creating app bundle..."
 	mkdir -p $(APP_DIR)/Contents/MacOS
@@ -64,6 +67,10 @@ app: $(BIN_DIR)/$(TARGET) resources/TPEventViewController.nib
 	cp -r resources/* $(APP_DIR)/Contents/Resources/
 	@echo "Compiled nib file location:"
 	@ls -l $(APP_DIR)/Contents/Resources/TPEventViewController.nib || true
+	@echo "Signing application with ad-hoc signature..."
+	codesign --force --deep --sign $(SIGN_IDENTITY) --entitlements config/tpmiddle.entitlements --timestamp --options runtime $(APP_DIR)
+	@echo "Verifying signature..."
+	codesign --verify --verbose $(APP_DIR)
 
 # Compile test files
 $(BUILD_DIR)/%.o: $(TEST_DIR)/%.mm

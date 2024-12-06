@@ -36,23 +36,86 @@
         NSArray<NSString *> *arguments = [[NSProcessInfo processInfo] arguments];
         [[TPConfig sharedConfig] applyCommandLineArguments:arguments];
         
-        // Initialize components
-        self.hidManager = [TPHIDManager sharedManager];
-        self.buttonManager = [TPButtonManager sharedManager];
+        // Initialize status bar first
         self.statusBarController = [TPStatusBarController sharedController];
-        
-        // Set up delegates
-        self.hidManager.delegate = self;
-        self.buttonManager.delegate = self;
         self.statusBarController.delegate = self;
         
-        // Create event viewer window
-        [self setupEventViewer];
-        
-        // Register global shortcut
-        [self registerGlobalShortcut];
+        // Check permissions and initialize other components
+        if ([self checkAccessibilityPermissions]) {
+            [self initializeComponents];
+        }
     }
     return self;
+}
+
+- (void)initializeComponents {
+    // Initialize HID and button managers
+    self.hidManager = [TPHIDManager sharedManager];
+    self.buttonManager = [TPButtonManager sharedManager];
+    
+    // Set up delegates
+    self.hidManager.delegate = self;
+    self.buttonManager.delegate = self;
+    
+    // Create event viewer window
+    [self setupEventViewer];
+    
+    // Register global shortcut
+    [self registerGlobalShortcut];
+}
+
+- (BOOL)checkAccessibilityPermissions {
+    // Check if we have accessibility permissions
+    NSDictionary *options = @{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES};
+    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    
+    if (!accessibilityEnabled) {
+        NSLog(@"Accessibility permissions not granted");
+        
+        // Show alert to user
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Accessibility Permissions Required";
+        alert.informativeText = @"TPMiddle needs accessibility permissions to function properly. Please grant permissions in System Settings > Privacy & Security > Accessibility, then relaunch the application.";
+        [alert addButtonWithTitle:@"Open System Settings"];
+        [alert addButtonWithTitle:@"Quit"];
+        
+        NSModalResponse response = [alert runModal];
+        if (response == NSAlertFirstButtonReturn) {
+            // Open System Settings to Accessibility
+            NSURL *settingsURL = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
+            [[NSWorkspace sharedWorkspace] openURL:settingsURL];
+        }
+        
+        [NSApp terminate:nil];
+        return NO;
+    }
+    
+    // Check if we have input monitoring permissions
+    if (!CGPreflightScreenCaptureAccess()) {
+        NSLog(@"Input monitoring permissions not granted");
+        
+        // Show alert to user
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Input Monitoring Permissions Required";
+        alert.informativeText = @"TPMiddle needs input monitoring permissions to function properly. Please grant permissions in System Settings > Privacy & Security > Input Monitoring, then relaunch the application.";
+        [alert addButtonWithTitle:@"Open System Settings"];
+        [alert addButtonWithTitle:@"Quit"];
+        
+        NSModalResponse response = [alert runModal];
+        if (response == NSAlertFirstButtonReturn) {
+            // Request input monitoring permission
+            CGRequestScreenCaptureAccess();
+            
+            // Open System Settings to Input Monitoring
+            NSURL *settingsURL = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"];
+            [[NSWorkspace sharedWorkspace] openURL:settingsURL];
+        }
+        
+        [NSApp terminate:nil];
+        return NO;
+    }
+    
+    return YES;
 }
 
 - (void)registerGlobalShortcut {
@@ -145,6 +208,11 @@
 #pragma mark - Public Methods
 
 - (void)start {
+    // Only start if we have all required permissions
+    if (![self checkAccessibilityPermissions]) {
+        return;
+    }
+    
     // Configure HID device matching
     [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsageMouse];
     [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsagePointer];
