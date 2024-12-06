@@ -2,7 +2,7 @@
 #include "TPConfig.h"
 #include "TPApplication.h"
 
-@interface TPEventViewController () {
+@interface TPEventViewController () <TPHIDManagerDelegate> {
     NSView *_centerIndicator;
     NSPoint _lastPoint;
     CGFloat _accumulatedScrollX;
@@ -102,19 +102,8 @@
 
 - (void)startMonitoring {
     NSLog(@"TPEventViewController startMonitoring");
-    // Remove any existing observers first
-    [self stopMonitoring];
-    
-    // Register for notifications
-    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-    [center addObserver:self
-               selector:@selector(handleMovementNotification:)
-                   name:@"TPMovementNotification"
-                 object:nil];
-    [center addObserver:self
-               selector:@selector(handleButtonNotification:)
-                   name:@"TPButtonNotification"
-                 object:nil];
+    // Set this view controller as the delegate of TPHIDManager
+    [TPHIDManager sharedManager].delegate = self;
     
     // Reset the view
     [self centerIndicator];
@@ -129,13 +118,24 @@
 
 - (void)stopMonitoring {
     NSLog(@"TPEventViewController stopMonitoring");
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    // Remove this view controller as the delegate if it is currently the delegate
+    if ([TPHIDManager sharedManager].delegate == self) {
+        [TPHIDManager sharedManager].delegate = nil;
+    }
 }
 
-#pragma mark - Notification Handlers
+#pragma mark - TPHIDManagerDelegate Methods
 
-- (void)handleMovementNotification:(NSNotification *)notification {
-    NSDictionary *info = notification.userInfo;
+- (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
+    // Update delta label
+    self.deltaLabel.stringValue = [NSString stringWithFormat:@"X: %d, Y: %d", deltaX, deltaY];
+    
+    // Move indicator
+    NSRect bounds = self.movementView.bounds;
+    CGFloat baseScale = 1.0; // Base scale factor
+    
+    // Calculate movement magnitude for diagonal scaling
+    CGFloat magnitude = sqrt(deltaX * deltaX + deltaY * deltaY);
     int deltaX = [info[@"deltaX"] intValue];
     int deltaY = [info[@"deltaY"] intValue];
     uint8_t buttons = [info[@"buttons"] unsignedCharValue];
