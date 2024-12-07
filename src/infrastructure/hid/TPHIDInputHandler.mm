@@ -1,5 +1,6 @@
 #import "TPHIDInputHandler.h"
 #import "TPLogger.h"
+#import "TPConfig.h"
 #import <CoreGraphics/CoreGraphics.h>
 #import <AppKit/AppKit.h>
 
@@ -25,17 +26,36 @@
 static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType type, CGEventRef event, void *refcon) {
     TPHIDInputHandler *handler = (__bridge TPHIDInputHandler *)refcon;
     if (handler.isScrollMode) {
-        // Block all mouse movement and drag events in scroll mode
-        if (type == kCGEventMouseMoved || type == kCGEventLeftMouseDragged || 
-            type == kCGEventRightMouseDragged || type == kCGEventOtherMouseDragged) {
-            return NULL;
-        }
-        
-        // For any other event in scroll mode, force cursor position
         CGPoint savedPos = handler->_savedCursorPosition;
-        CGEventSetLocation(event, savedPos);
-        CGEventSetIntegerValueField(event, kCGMouseEventDeltaX, 0);
-        CGEventSetIntegerValueField(event, kCGMouseEventDeltaY, 0);
+        if (!CGPointEqualToPoint(savedPos, CGPointZero)) {
+            // Block all mouse-related events except scroll
+            if (type == kCGEventMouseMoved || 
+                type == kCGEventLeftMouseDragged || 
+                type == kCGEventRightMouseDragged || 
+                type == kCGEventOtherMouseDragged ||
+                type == kCGEventLeftMouseDown ||
+                type == kCGEventLeftMouseUp ||
+                type == kCGEventRightMouseDown ||
+                type == kCGEventRightMouseUp ||
+                type == kCGEventOtherMouseDown ||
+                type == kCGEventOtherMouseUp) {
+                
+                // Force cursor back to saved position
+                CGWarpMouseCursorPosition(savedPos);
+                CGAssociateMouseAndMouseCursorPosition(true);
+                
+                // For non-movement events, allow them but fix position
+                if (type != kCGEventMouseMoved && 
+                    type != kCGEventLeftMouseDragged && 
+                    type != kCGEventRightMouseDragged && 
+                    type != kCGEventOtherMouseDragged) {
+                    CGEventSetLocation(event, savedPos);
+                    return event;
+                }
+                
+                return NULL;
+            }
+        }
     }
     return event;
 }
@@ -101,6 +121,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     _rightButtonDown = NO;
     _middleButtonDown = NO;
     _isScrollMode = NO;
+    CGAssociateMouseAndMouseCursorPosition(true);
     [_stateLock unlock];
 }
 
@@ -170,17 +191,11 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                         if (event) {
                             _savedCursorPosition = CGEventGetLocation(event);
                             CFRelease(event);
-                            
-                            // Force initial cursor position
-                            CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved, _savedCursorPosition, kCGMouseButtonLeft);
-                            if (moveEvent) {
-                                CGEventSetFlags(moveEvent, kCGEventFlagMaskNonCoalesced);
-                                CGEventSetIntegerValueField(moveEvent, kCGMouseEventDeltaX, 0);
-                                CGEventSetIntegerValueField(moveEvent, kCGMouseEventDeltaY, 0);
-                                CGEventPost(kCGHIDEventTap, moveEvent);
-                                CFRelease(moveEvent);
-                            }
+                            // Force cursor to stay at saved position
+                            CGWarpMouseCursorPosition(_savedCursorPosition);
                         }
+                    } else {
+                        CGAssociateMouseAndMouseCursorPosition(true);
                     }
                 }
                 _middleButtonDown = NO;
@@ -207,24 +222,51 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     
     [_stateLock lock];
     BOOL isScrollModeActive = _isScrollMode && !_middleButtonDown;
+    CGPoint savedPos = _savedCursorPosition;
     [_stateLock unlock];
     
     if (isScrollModeActive) {
-        // In scroll mode, convert movement to scroll
+        // Force cursor back to saved position
+        if (!CGPointEqualToPoint(savedPos, CGPointZero)) {
+            CGWarpMouseCursorPosition(savedPos);
+        }
+        
+        // Convert movement to scroll
         IOHIDElementRef element = IOHIDValueGetElement(value);
         uint32_t usage = IOHIDElementGetUsage(element);
         CFIndex movement = IOHIDValueGetIntegerValue(value);
         
-        // Increased multiplier for faster scrolling
-        const int multiplier = 12;
+        // Get scroll settings from config
+        TPConfig *config = [TPConfig sharedConfig];
+        double speedMultiplier = config.scrollSpeedMultiplier;
+        double acceleration = config.scrollAcceleration;
+        BOOL naturalScrolling = config.naturalScrolling;
+        BOOL invertX = config.invertScrollX;
+        BOOL invertY = config.invertScrollY;
+        
+        // Base multiplier for faster response
+        const double baseMultiplier = 20.0;
+        
+        // Apply speed multiplier and acceleration
+        double adjustedMovement = movement * baseMultiplier * speedMultiplier;
+        if (fabs(adjustedMovement) > 1.0) {
+            adjustedMovement *= (1.0 + (fabs(adjustedMovement) * acceleration * 0.1));
+        }
+        
         int deltaX = 0;
         int deltaY = 0;
         
         if (usage == kHIDUsage_GD_X) {
-            deltaX = -(int)movement * multiplier;
+            deltaX = -(int)adjustedMovement;
+            if (invertX) deltaX = -deltaX;
         }
         else if (usage == kHIDUsage_GD_Y) {
-            deltaY = -(int)movement * multiplier;
+            deltaY = -(int)adjustedMovement;
+            if (invertY) deltaY = -deltaY;
+        }
+        
+        if (naturalScrolling) {
+            deltaY = -deltaY;
         }
         
         if (deltaX != 0 || deltaY != 0) {
@@ -234,6 +276,11 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 CGEventPost(kCGHIDEventTap, scrollEvent);
                 CFRelease(scrollEvent);
             }
+        }
+        
+        // Force cursor position again after scroll
+        if (!CGPointEqualToPoint(savedPos, CGPointZero)) {
+            CGWarpMouseCursorPosition(savedPos);
         }
         return;
     }
@@ -274,10 +321,29 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     if (!value) return;
     
     CFIndex scrollDelta = IOHIDValueGetIntegerValue(value);
+    
+    // Apply natural scrolling if enabled
+    if ([TPConfig sharedConfig].naturalScrolling) {
+        scrollDelta = -scrollDelta;
+    }
+    
+    [_stateLock lock];
+    BOOL isScrollModeActive = _isScrollMode;
+    CGPoint savedPos = _savedCursorPosition;
+    [_stateLock unlock];
+    
+    if (isScrollModeActive && !CGPointEqualToPoint(savedPos, CGPointZero)) {
+        CGWarpMouseCursorPosition(savedPos);
+    }
+    
     CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 1, scrollDelta);
     if (scrollEvent) {
         CGEventPost(kCGHIDEventTap, scrollEvent);
         CFRelease(scrollEvent);
+    }
+    
+    if (isScrollModeActive && !CGPointEqualToPoint(savedPos, CGPointZero)) {
+        CGWarpMouseCursorPosition(savedPos);
     }
 }
 
