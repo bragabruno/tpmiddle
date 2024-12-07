@@ -21,6 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)resetPendingMovements;
 - (uint8_t)currentButtonState;
 - (void)toggleScrollMode;
+- (void)enforceSavedCursorPosition;
 
 @end
 

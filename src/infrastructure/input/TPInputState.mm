@@ -50,11 +50,73 @@ static const uint8_t kMiddleButtonBit = 1 << 2;
     if (_isScrollMode) {
         // Save current cursor position when entering scroll mode
         CGEventRef event = CGEventCreate(NULL);
-        _savedCursorPosition = CGEventGetLocation(event);
-        CFRelease(event);
+        if (event) {
+            _savedCursorPosition = CGEventGetLocation(event);
+            CFRelease(event);
+            
+            // Create a mouse moved event to ensure the cursor stays put
+            CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, 
+                                                         kCGEventMouseMoved,
+                                                         _savedCursorPosition,
+                                                         kCGMouseButtonLeft);
+            if (moveEvent) {
+                // Set flags to prevent cursor movement
+                CGEventSetFlags(moveEvent, kCGEventFlagMaskNonCoalesced);
+                CGEventSetIntegerValueField(moveEvent, kCGMouseEventDeltaX, 0);
+                CGEventSetIntegerValueField(moveEvent, kCGMouseEventDeltaY, 0);
+                
+                // Post the event
+                CGEventPost(kCGHIDEventTap, moveEvent);
+                CFRelease(moveEvent);
+            }
+        }
     }
     
     [self resetPendingMovements];
+}
+
+- (void)enforceSavedCursorPosition {
+    if (_isScrollMode && !CGPointEqualToPoint(_savedCursorPosition, CGPointZero)) {
+        // Create a mouse moved event
+        CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, 
+                                                     kCGEventMouseMoved,
+                                                     _savedCursorPosition,
+                                                     kCGMouseButtonLeft);
+        if (moveEvent) {
+            // Set flags to prevent cursor movement
+            CGEventSetFlags(moveEvent, kCGEventFlagMaskNonCoalesced);
+            CGEventSetIntegerValueField(moveEvent, kCGMouseEventDeltaX, 0);
+            CGEventSetIntegerValueField(moveEvent, kCGMouseEventDeltaY, 0);
+            
+            // Post the event with high priority
+            CGEventPost(kCGHIDEventTap, moveEvent);
+            
+            // Release the event
+            CFRelease(moveEvent);
+            
+            // Double-check current position and correct if needed
+            CGEventRef currentEvent = CGEventCreate(NULL);
+            if (currentEvent) {
+                CGPoint currentPos = CGEventGetLocation(currentEvent);
+                CFRelease(currentEvent);
+                
+                if (!CGPointEqualToPoint(currentPos, _savedCursorPosition)) {
+                    // If position changed, force it back immediately
+                    CGEventRef forceEvent = CGEventCreateMouseEvent(NULL, 
+                                                                  kCGEventMouseMoved,
+                                                                  _savedCursorPosition,
+                                                                  kCGMouseButtonLeft);
+                    if (forceEvent) {
+                        CGEventSetFlags(forceEvent, kCGEventFlagMaskNonCoalesced);
+                        CGEventSetIntegerValueField(forceEvent, kCGMouseEventDeltaX, 0);
+                        CGEventSetIntegerValueField(forceEvent, kCGMouseEventDeltaY, 0);
+                        CGEventPost(kCGHIDEventTap, forceEvent);
+                        CFRelease(forceEvent);
+                    }
+                }
+            }
+        }
+    }
 }
 
 @end
