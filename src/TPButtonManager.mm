@@ -185,6 +185,14 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 }
                 break;
                 
+            case kCGEventScrollWheel:
+                // Ensure consistent scroll direction by modifying the event
+                if (_middlePressed || _middleEmulated) {
+                    [_stateLock unlock];
+                    return NULL; // Let our custom scroll handling take care of it
+                }
+                break;
+                
             default:
                 break;
         }
@@ -283,9 +291,10 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     CGFloat speed = sqrt(deltaX * deltaX + deltaY * deltaY);
     CGFloat accelerationFactor = 1.0 + (speed * config.scrollAcceleration * timeDelta);
     
-    // Apply direction adjustments
-    CGFloat adjustedDeltaX = deltaX * (config.invertScrollX ? -1 : 1);
-    CGFloat adjustedDeltaY = deltaY * (config.invertScrollY ? -1 : 1);
+    // Always apply the same direction logic regardless of natural scrolling setting
+    // This ensures consistent behavior across all applications
+    CGFloat adjustedDeltaX = deltaX;
+    CGFloat adjustedDeltaY = deltaY;
     
     [_stateLock lock];
     // Accumulate movement with acceleration and speed multiplier
@@ -300,11 +309,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         CGFloat scrollX = MIN(MAX(_accumulatedDeltaX, -kMaxScrollSpeed), kMaxScrollSpeed);
         CGFloat scrollY = MIN(MAX(_accumulatedDeltaY, -kMaxScrollSpeed), kMaxScrollSpeed);
         
-        // Apply natural scrolling if enabled
-        if (config.naturalScrolling) {
-            scrollX = -scrollX;
-            scrollY = -scrollY;
-        }
+        // Always invert the scroll direction to match natural scrolling behavior
+        scrollX = -scrollX;
+        scrollY = -scrollY;
         
         // Reset accumulated deltas
         _accumulatedDeltaX = 0;
@@ -383,6 +390,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 );
                 
                 if (scrollEvent) {
+                    // Set scroll event flags to ensure consistent behavior
+                    CGEventSetFlags(scrollEvent, kCGEventFlagMaskNonCoalesced);
+                    
                     // Post the event
                     CGEventPost(kCGHIDEventTap, scrollEvent);
                     CFRelease(scrollEvent);
