@@ -287,9 +287,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     CGFloat speed = sqrt(deltaX * deltaX + deltaY * deltaY);
     CGFloat accelerationFactor = 1.0 + (speed * config.scrollAcceleration * timeDelta);
     
-    // Use raw movement values for consistent natural scrolling
-    CGFloat adjustedDeltaX = deltaX;
-    CGFloat adjustedDeltaY = deltaY;
+    // Invert the movement values for natural scrolling direction
+    CGFloat adjustedDeltaX = -deltaX;
+    CGFloat adjustedDeltaY = -deltaY;
     
     [_stateLock lock];
     // Accumulate movement with acceleration and speed multiplier
@@ -311,7 +311,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         
         [_stateLock unlock];
         
-        // Post scroll event with natural scrolling
+        // Post scroll event
         [self postScrollEvent:scrollY deltaX:scrollX];
     } else {
         [_stateLock unlock];
