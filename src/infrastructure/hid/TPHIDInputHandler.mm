@@ -236,7 +236,7 @@
         }
         
         NSTimeInterval timeSinceLastMovement = [[NSDate date] timeIntervalSinceDate:_lastMovementTime];
-        if (timeSinceLastMovement >= 0.008) { // Increased interval for smoother movement
+        if (timeSinceLastMovement >= 0.004) { // Decreased interval for more responsive movement
             uint8_t buttons = (_leftButtonDown ? kLeftButtonBit : 0) | 
                              (_rightButtonDown ? kRightButtonBit : 0) | 
                              (_middleButtonDown ? kMiddleButtonBit : 0);
@@ -252,9 +252,9 @@
             
             if (scrollMode) {
                 if (deltaX != 0 || deltaY != 0) {
-                    // Accumulate scroll values for smoother scrolling
-                    _scrollAccumX += deltaX * 0.5;
-                    _scrollAccumY += deltaY * 0.5;
+                    // Increased scaling factor for faster scrolling
+                    _scrollAccumX += deltaX * 1.5;
+                    _scrollAccumY += deltaY * 1.5;
                     
                     int scrollX = (int)_scrollAccumX;
                     int scrollY = (int)_scrollAccumY;
