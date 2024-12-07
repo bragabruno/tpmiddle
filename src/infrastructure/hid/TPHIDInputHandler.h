@@ -1,32 +1,24 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #ifdef __OBJC__
+
 #import <Foundation/Foundation.h>
-#import <IOKit/hid/IOHIDManager.h>
+#import <IOKit/hid/IOHIDLib.h>
 #import "TPHIDManagerDelegate.h"
-#import "TPHIDManagerTypes.h"
+
+// Button state bits
+#define kLeftButtonBit   0x01
+#define kRightButtonBit  0x02
+#define kMiddleButtonBit 0x04
 
 @interface TPHIDInputHandler : NSObject
 
-@property (weak) id<TPHIDManagerDelegate> delegate;
-@property (readonly) BOOL isScrollMode;
+@property (atomic, assign) BOOL isScrollMode;
+@property (atomic, weak) id<TPHIDManagerDelegate> delegate;
 
-- (instancetype)init;
 - (void)handleInput:(IOHIDValueRef)value;
-- (void)handleButtonInput:(IOHIDValueRef)value;
-- (void)handleMovementInput:(IOHIDValueRef)value;
-- (void)handleScrollInput:(IOHIDValueRef)value;
-- (void)handleScrollInput:(int)verticalDelta withHorizontal:(int)horizontalDelta;
 - (void)reset;
 
 @end
 
-#endif // __OBJC__
-
-#ifdef __cplusplus
-}
 #endif

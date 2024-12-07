@@ -11,10 +11,10 @@ extern "C" {
 
 @interface TPHIDManager : NSObject
 
-@property (weak) id<TPHIDManagerDelegate> delegate;
-@property (readonly) NSArray *devices;
-@property (readonly) BOOL isRunning;
-@property (nonatomic, readonly) BOOL isScrollMode;  // Updated isScrollMode property
+@property (nonatomic, weak) id<TPHIDManagerDelegate> delegate;
+@property (nonatomic, readonly, copy) NSArray *devices;
+@property (nonatomic, readonly) BOOL isRunning;
+@property (nonatomic, readonly) BOOL isScrollMode;
 
 + (instancetype)sharedManager;
 

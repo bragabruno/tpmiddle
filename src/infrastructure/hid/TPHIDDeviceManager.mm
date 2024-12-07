@@ -17,6 +17,9 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     BOOL _isRunning;
     BOOL _isInitialized;
     BOOL _waitingForPermissions;
+    NSLock *_deviceLock;
+    NSLock *_delegateLock;
+    dispatch_queue_t _deviceQueue;
 }
 @end
 
@@ -33,12 +36,19 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         _isInitialized = NO;
         _waitingForPermissions = NO;
         _hidManager = NULL;
+        _deviceLock = [[NSLock alloc] init];
+        _delegateLock = [[NSLock alloc] init];
+        _deviceQueue = dispatch_queue_create("com.tpmiddle.devicemanager", DISPATCH_QUEUE_SERIAL);
+        dispatch_set_target_queue(_deviceQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
     }
     return self;
 }
 
 - (void)dealloc {
     [self stop];
+    _deviceLock = nil;
+    _delegateLock = nil;
+    _deviceQueue = NULL;
 }
 
 - (void)showPermissionAlert:(NSString *)message {
@@ -50,9 +60,9 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         [alert addButtonWithTitle:@"Try Again"];
         [alert addButtonWithTitle:@"Quit"];
         
-        _waitingForPermissions = YES;
+        self->_waitingForPermissions = YES;
         NSModalResponse response = [alert runModal];
-        _waitingForPermissions = NO;
+        self->_waitingForPermissions = NO;
         
         if (response == NSAlertFirstButtonReturn) {
             // Open System Settings
@@ -118,9 +128,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         if (!_waitingForPermissions) {
             [self showPermissionAlert:permissionError.localizedDescription];
         }
-        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
-            [self.delegate didEncounterError:permissionError];
-        }
+        [self notifyDelegateOfError:permissionError];
         [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Permission error: %@", permissionError.localizedDescription]];
         return NO;
     }
@@ -209,9 +217,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     // Validate configuration first
     NSError *configError = [self validateConfiguration];
     if (configError) {
-        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
-            [self.delegate didEncounterError:configError];
-        }
+        [self notifyDelegateOfError:configError];
         [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Configuration error: %@", configError.localizedDescription]];
         return NO;
     }
@@ -234,6 +240,10 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         _hidManager = NULL;
     }
     
+    [_deviceLock lock];
+    [_devices removeAllObjects];
+    [_deviceLock unlock];
+    
     _isRunning = NO;
     _isInitialized = NO;
     [[TPLogger sharedLogger] logMessage:@"HID Manager stopped"];
@@ -243,18 +253,19 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     NSMutableString *status = [NSMutableString string];
     [status appendString:@"=== HID Manager Device Status ===\n"];
     [status appendFormat:@"Running: %@\n", _isRunning ? @"Yes" : @"No"];
+    
+    [_deviceLock lock];
     [status appendFormat:@"Connected Devices: %lu\n", (unsigned long)_devices.count];
     
-    @synchronized(_devices) {
-        for (id device in _devices) {
-            IOHIDDeviceRef deviceRef = (__bridge IOHIDDeviceRef)device;
-            NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductKey));
-            NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDVendorIDKey));
-            NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductIDKey));
-            [status appendFormat:@"- Device: %@\n  Vendor ID: 0x%04X\n  Product ID: 0x%04X\n",
-             product, vendorID.unsignedIntValue, productID.unsignedIntValue];
-        }
+    for (id device in _devices) {
+        IOHIDDeviceRef deviceRef = (__bridge IOHIDDeviceRef)device;
+        NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductKey));
+        NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDVendorIDKey));
+        NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(deviceRef, CFSTR(kIOHIDProductIDKey));
+        [status appendFormat:@"- Device: %@\n  Vendor ID: 0x%04X\n  Product ID: 0x%04X\n",
+         product, vendorID.unsignedIntValue, productID.unsignedIntValue];
     }
+    [_deviceLock unlock];
     
     [status appendString:@"===========================\n"];
     return status;
@@ -277,48 +288,96 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     return config;
 }
 
+#pragma mark - Private Methods
+
+- (void)notifyDelegateOfError:(NSError *)error {
+    [_delegateLock lock];
+    id<TPHIDManagerDelegate> delegate = self.delegate;
+    [_delegateLock unlock];
+    
+    if (!delegate) return;
+    
+    if ([delegate respondsToSelector:@selector(didEncounterError:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [delegate didEncounterError:error];
+        });
+    }
+}
+
 #pragma mark - Device Management
 
 - (void)deviceAdded:(IOHIDDeviceRef)device {
     if (!device) return;
     
-    @synchronized(_devices) {
-        if (![_devices containsObject:(__bridge id)device]) {
-            // Retain the device
-            CFRetain(device);
-            [_devices addObject:(__bridge id)device];
-            
-            NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
-            NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey));
-            NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey));
-            
-            NSLog(@"Device added - Product: %@, Vendor ID: %@, Product ID: %@", product, vendorID, productID);
-            
-            if ([self.delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
-                [self.delegate didDetectDeviceAttached:product];
+    dispatch_async(_deviceQueue, ^{
+        @try {
+            [self->_deviceLock lock];
+            if (![self->_devices containsObject:(__bridge id)device]) {
+                // Retain the device
+                CFRetain(device);
+                [self->_devices addObject:(__bridge id)device];
+                
+                NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+                NSNumber *vendorID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey));
+                NSNumber *productID = (__bridge_transfer NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey));
+                
+                NSLog(@"Device added - Product: %@, Vendor ID: %@, Product ID: %@", product, vendorID, productID);
+                
+                [self->_deviceLock unlock];
+                
+                [self->_delegateLock lock];
+                id<TPHIDManagerDelegate> delegate = self.delegate;
+                [self->_delegateLock unlock];
+                
+                if ([delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [delegate didDetectDeviceAttached:product];
+                    });
+                }
+            } else {
+                [self->_deviceLock unlock];
             }
+        } @catch (NSException *exception) {
+            [self->_deviceLock unlock];
+            [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in deviceAdded: %@", exception]];
         }
-    }
+    });
 }
 
 - (void)deviceRemoved:(IOHIDDeviceRef)device {
     if (!device) return;
     
-    @synchronized(_devices) {
-        if ([_devices containsObject:(__bridge id)device]) {
-            NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
-            [_devices removeObject:(__bridge id)device];
-            
-            // Release the device
-            CFRelease(device);
-            
-            NSLog(@"Device removed - Product: %@", product);
-            
-            if ([self.delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
-                [self.delegate didDetectDeviceDetached:product];
+    dispatch_async(_deviceQueue, ^{
+        @try {
+            [self->_deviceLock lock];
+            if ([self->_devices containsObject:(__bridge id)device]) {
+                NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+                [self->_devices removeObject:(__bridge id)device];
+                
+                // Release the device
+                CFRelease(device);
+                
+                NSLog(@"Device removed - Product: %@", product);
+                
+                [self->_deviceLock unlock];
+                
+                [self->_delegateLock lock];
+                id<TPHIDManagerDelegate> delegate = self.delegate;
+                [self->_delegateLock unlock];
+                
+                if ([delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [delegate didDetectDeviceDetached:product];
+                    });
+                }
+            } else {
+                [self->_deviceLock unlock];
             }
+        } @catch (NSException *exception) {
+            [self->_deviceLock unlock];
+            [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in deviceRemoved: %@", exception]];
         }
-    }
+    });
 }
 
 #pragma mark - Callbacks
@@ -329,10 +388,10 @@ static void Handle_DeviceMatchingCallback(void *context, IOReturn result, void *
         return;
     }
     
-    TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+        TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
         [manager deviceAdded:device];
-    });
+    }
 }
 
 static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *sender __unused, IOHIDDeviceRef device) {
@@ -341,10 +400,10 @@ static void Handle_DeviceRemovalCallback(void *context, IOReturn result, void *s
         return;
     }
     
-    TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+        TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
         [manager deviceRemoved:device];
-    });
+    }
 }
 
 static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void *sender __unused, IOHIDValueRef value) {
@@ -353,11 +412,24 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         return;
     }
     
-    TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
-    if ([manager.delegate respondsToSelector:@selector(didReceiveHIDValue:)]) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [manager.delegate performSelector:@selector(didReceiveHIDValue:) withObject:(__bridge id)value];
-        });
+    @autoreleasepool {
+        TPHIDDeviceManager *manager = (__bridge TPHIDDeviceManager *)context;
+        
+        [manager->_delegateLock lock];
+        id<TPHIDManagerDelegate> delegate = manager.delegate;
+        [manager->_delegateLock unlock];
+        
+        if ([delegate respondsToSelector:@selector(didReceiveHIDValue:)]) {
+            // Create a strong reference to the value
+            CFRetain(value);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                @try {
+                    [delegate didReceiveHIDValue:(__bridge id)value];
+                } @finally {
+                    CFRelease(value);
+                }
+            });
+        }
     }
 }
 

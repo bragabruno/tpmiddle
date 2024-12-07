@@ -20,7 +20,12 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     
     @autoreleasepool {
         TPButtonManager *manager = (__bridge TPButtonManager *)refcon;
-        return [manager handleEventTapEvent:type event:event];
+        @try {
+            return [manager handleEventTapEvent:type event:event];
+        } @catch (NSException *exception) {
+            NSLog(@"Exception in eventTapCallback: %@", exception);
+            return event;
+        }
     }
 }
 
@@ -43,7 +48,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     
     // Thread safety
     NSLock *_stateLock;
+    NSLock *_delegateLock;
     dispatch_queue_t _eventQueue;
+    dispatch_queue_t _delegateQueue;
 }
 @end
 
@@ -61,7 +68,10 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
 - (instancetype)init {
     if (self = [super init]) {
         _stateLock = [[NSLock alloc] init];
-        _eventQueue = dispatch_queue_create("com.tpmiddle.buttonManager", DISPATCH_QUEUE_SERIAL);
+        _delegateLock = [[NSLock alloc] init];
+        _eventQueue = dispatch_queue_create("com.tpmiddle.buttonManager.event", DISPATCH_QUEUE_SERIAL);
+        _delegateQueue = dispatch_queue_create("com.tpmiddle.buttonManager.delegate", DISPATCH_QUEUE_SERIAL);
+        dispatch_set_target_queue(_eventQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
         [self reset];
         [self setupEventTap];
     }
@@ -71,7 +81,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
 - (void)dealloc {
     [self teardownEventTap];
     _stateLock = nil;
+    _delegateLock = nil;
     _eventQueue = NULL;
+    _delegateQueue = NULL;
 }
 
 #pragma mark - Event Tap Setup
@@ -335,6 +347,20 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
 
 #pragma mark - Private Methods
 
+- (void)notifyDelegateOfMiddleButtonState:(BOOL)isDown {
+    [_delegateLock lock];
+    id<TPButtonManagerDelegate> delegate = self.delegate;
+    [_delegateLock unlock];
+    
+    if (!delegate) return;
+    
+    if ([delegate respondsToSelector:@selector(middleButtonStateChanged:)]) {
+        dispatch_async(_delegateQueue, ^{
+            [delegate middleButtonStateChanged:isDown];
+        });
+    }
+}
+
 - (void)postMiddleButtonEvent:(BOOL)isDown {
     @try {
         CGEventRef event = CGEventCreate(NULL);
@@ -347,34 +373,34 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         CFRelease(event);
         
         dispatch_async(_eventQueue, ^{
-            // Create and post middle button event
-            CGEventRef mouseEvent = CGEventCreateMouseEvent(
-                NULL,
-                isDown ? kCGEventOtherMouseDown : kCGEventOtherMouseUp,
-                pos,
-                kCGMouseButtonCenter
-            );
-            
-            if (mouseEvent) {
-                CGEventPost(kCGHIDEventTap, mouseEvent);
-                CFRelease(mouseEvent);
+            @try {
+                // Create and post middle button event
+                CGEventRef mouseEvent = CGEventCreateMouseEvent(
+                    NULL,
+                    isDown ? kCGEventOtherMouseDown : kCGEventOtherMouseUp,
+                    pos,
+                    kCGMouseButtonCenter
+                );
                 
-                // Log middle button emulation
-                [[TPLogger sharedLogger] logMiddleButtonEmulation:isDown];
-                
-                // Notify delegate
-                if ([self.delegate respondsToSelector:@selector(middleButtonStateChanged:)]) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [self.delegate middleButtonStateChanged:isDown];
-                    });
+                if (mouseEvent) {
+                    CGEventPost(kCGHIDEventTap, mouseEvent);
+                    CFRelease(mouseEvent);
+                    
+                    // Log middle button emulation
+                    [[TPLogger sharedLogger] logMiddleButtonEmulation:isDown];
+                    
+                    // Notify delegate
+                    [self notifyDelegateOfMiddleButtonState:isDown];
+                    
+                    if ([TPConfig sharedConfig].debugMode) {
+                        DebugLog(@"Posted middle button %@ event at {%f, %f}",
+                                isDown ? @"down" : @"up", pos.x, pos.y);
+                    }
+                } else {
+                    NSLog(@"Failed to create mouse event");
                 }
-                
-                if ([TPConfig sharedConfig].debugMode) {
-                    DebugLog(@"Posted middle button %@ event at {%f, %f}",
-                            isDown ? @"down" : @"up", pos.x, pos.y);
-                }
-            } else {
-                NSLog(@"Failed to create mouse event");
+            } @catch (NSException *exception) {
+                NSLog(@"Exception in postMiddleButtonEvent async block: %@", exception);
             }
         });
     } @catch (NSException *exception) {
@@ -385,28 +411,32 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
 - (void)postScrollEvent:(CGFloat)deltaY deltaX:(CGFloat)deltaX {
     @try {
         dispatch_async(_eventQueue, ^{
-            // Create scroll event (using pixel units for smoother scrolling)
-            CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
-                NULL,
-                kCGScrollEventUnitPixel,
-                2,  // number of axes
-                (int32_t)deltaY,
-                (int32_t)deltaX
-            );
-            
-            if (scrollEvent) {
-                // Post the event
-                CGEventPost(kCGHIDEventTap, scrollEvent);
-                CFRelease(scrollEvent);
+            @try {
+                // Create scroll event (using pixel units for smoother scrolling)
+                CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
+                    NULL,
+                    kCGScrollEventUnitPixel,
+                    2,  // number of axes
+                    (int32_t)deltaY,
+                    (int32_t)deltaX
+                );
                 
-                // Log scroll event
-                [[TPLogger sharedLogger] logScrollEvent:deltaX deltaY:deltaY];
-                
-                if ([TPConfig sharedConfig].debugMode) {
-                    DebugLog(@"Posted scroll event - deltaX: %.2f, deltaY: %.2f", deltaX, deltaY);
+                if (scrollEvent) {
+                    // Post the event
+                    CGEventPost(kCGHIDEventTap, scrollEvent);
+                    CFRelease(scrollEvent);
+                    
+                    // Log scroll event
+                    [[TPLogger sharedLogger] logScrollEvent:deltaX deltaY:deltaY];
+                    
+                    if ([TPConfig sharedConfig].debugMode) {
+                        DebugLog(@"Posted scroll event - deltaX: %.2f, deltaY: %.2f", deltaX, deltaY);
+                    }
+                } else {
+                    NSLog(@"Failed to create scroll event");
                 }
-            } else {
-                NSLog(@"Failed to create scroll event");
+            } @catch (NSException *exception) {
+                NSLog(@"Exception in postScrollEvent async block: %@", exception);
             }
         });
     } @catch (NSException *exception) {
