@@ -1,6 +1,7 @@
 #import "TPHIDInputHandler.h"
 #import "TPLogger.h"
 #import <CoreGraphics/CoreGraphics.h>
+#import <AppKit/AppKit.h>
 
 @interface TPHIDInputHandler () {
     BOOL _leftButtonDown;
@@ -177,25 +178,23 @@
                     _middleButtonPressTime = [NSDate date];
                     _middleButtonDown = YES;
                     stateChanged = YES;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        // Show open hand cursor when middle button is pressed
+                        [[NSCursor openHandCursor] set];
+                        // Save current cursor position
+                        CGEventRef event = CGEventCreate(NULL);
+                        if (event) {
+                            self->_savedCursorPosition = CGEventGetLocation(event);
+                            CFRelease(event);
+                        }
+                    });
                 } else if (!buttonState && _middleButtonDown) {
                     NSTimeInterval pressDuration = [[NSDate date] timeIntervalSinceDate:_middleButtonPressTime];
                     if (pressDuration < 0.3) {
                         _isScrollMode = !_isScrollMode;
-                        if (_isScrollMode) {
+                        if (!_isScrollMode) {
                             dispatch_async(dispatch_get_main_queue(), ^{
-                                CGEventRef event = CGEventCreate(NULL);
-                                if (event) {
-                                    self->_savedCursorPosition = CGEventGetLocation(event);
-                                    // Create a dummy move event to ensure proper cursor state
-                                    CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
-                                                                               self->_savedCursorPosition,
-                                                                               kCGMouseButtonLeft);
-                                    if (moveEvent) {
-                                        CGEventPost(kCGHIDEventTap, moveEvent);
-                                        CFRelease(moveEvent);
-                                    }
-                                    CFRelease(event);
-                                }
+                                [[NSCursor arrowCursor] set];
                             });
                         }
                     }
@@ -245,15 +244,13 @@
             int deltaX = _pendingDeltaX;
             int deltaY = _pendingDeltaY;
             BOOL scrollMode = _isScrollMode;
-            BOOL middleDown = _middleButtonDown;
-            CGPoint cursorPos = _savedCursorPosition;
             
             _pendingDeltaX = 0;
             _pendingDeltaY = 0;
             _lastMovementTime = [NSDate date];
             [_stateLock unlock];
             
-            if (scrollMode && !middleDown) {
+            if (scrollMode) {
                 if (deltaX != 0 || deltaY != 0) {
                     // Accumulate scroll values for smoother scrolling
                     _scrollAccumX += deltaX * 0.5;
@@ -268,20 +265,13 @@
                         _scrollAccumY -= scrollY;
                     }
                     
+                    // Keep cursor at saved position only in scroll mode
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        // Create a move event to maintain cursor state
-                        CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
-                                                                   cursorPos,
-                                                                   kCGMouseButtonLeft);
-                        if (moveEvent) {
-                            CGEventSetIntegerValueField(moveEvent, kCGMouseEventWindowUnderMousePointer, 0);
-                            CGEventSetIntegerValueField(moveEvent, kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent, 0);
-                            CGEventPost(kCGHIDEventTap, moveEvent);
-                            CFRelease(moveEvent);
-                        }
+                        CGWarpMouseCursorPosition(self->_savedCursorPosition);
                     });
                 }
             } else {
+                // Allow normal cursor movement when not in scroll mode
                 if (deltaX != 0 || deltaY != 0) {
                     [self notifyDelegateOfMovement:deltaX deltaY:deltaY buttons:buttons];
                 }
