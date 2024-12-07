@@ -53,7 +53,26 @@ NSString * const TPPermissionManagerErrorDomain = @"com.tpmiddle.permissions";
                              userInfo:@{NSLocalizedDescriptionKey: @"Failed to create test HID manager"}];
     }
     
+    // Set up matching criteria similar to the actual usage
+    NSDictionary *mouseMatching = @{
+        @(kIOHIDDeviceUsagePageKey): @(kHIDPage_GenericDesktop),
+        @(kIOHIDDeviceUsageKey): @(kHIDUsage_GD_Mouse)
+    };
+    NSDictionary *pointerMatching = @{
+        @(kIOHIDDeviceUsagePageKey): @(kHIDPage_GenericDesktop),
+        @(kIOHIDDeviceUsageKey): @(kHIDUsage_GD_Pointer)
+    };
+    
+    NSArray *criteria = @[mouseMatching, pointerMatching];
+    IOHIDManagerSetDeviceMatchingMultiple(testManager, (__bridge CFArrayRef)criteria);
+    
+    // Schedule with run loop to ensure proper initialization
+    IOHIDManagerScheduleWithRunLoop(testManager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+    
     IOReturn result = IOHIDManagerOpen(testManager, kIOHIDOptionsTypeNone);
+    
+    // Clean up
+    IOHIDManagerUnscheduleFromRunLoop(testManager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     CFRelease(testManager);
     
     if (result == kIOReturnNotPermitted) {

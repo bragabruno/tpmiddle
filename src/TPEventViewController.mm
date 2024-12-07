@@ -19,7 +19,13 @@
 @implementation TPEventViewController
 
 - (instancetype)init {
-    self = [super init];
+    [[TPLogger sharedLogger] logMessage:@"TPEventViewController init called"];
+    return [self initWithNibName:@"TPEventViewController" bundle:[NSBundle mainBundle]];
+}
+
+- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
+    [[TPLogger sharedLogger] logMessage:@"TPEventViewController initWithNibName called"];
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self) {
         _hidManager = [TPHIDManager sharedManager];
         _hidManager.delegate = self;
@@ -28,41 +34,14 @@
         _deltaPoint = NSZeroPoint;
         _buttonState = 0;
         
-        [self loadCustomView];
+        [[TPLogger sharedLogger] logMessage:@"TPEventViewController initialized"];
     }
     return self;
 }
 
-- (void)loadCustomView {
-    NSArray *topLevelObjects = nil;
-    NSNib *nib = [[NSNib alloc] initWithNibNamed:@"TPEventViewController" bundle:[NSBundle mainBundle]];
-    if (![nib instantiateWithOwner:self topLevelObjects:&topLevelObjects]) {
-        [[TPLogger sharedLogger] logMessage:@"Failed to load TPEventViewController.nib"];
-        return;
-    }
-    
-    // Find the main view in top level objects
-    for (id object in topLevelObjects) {
-        if ([object isKindOfClass:[NSView class]]) {
-            self.contentView = object;
-            break;
-        }
-    }
-    
-    if (!self.contentView) {
-        [[TPLogger sharedLogger] logMessage:@"Failed to find main view in nib"];
-        return;
-    }
-    
-    [[TPLogger sharedLogger] logMessage:@"TPEventViewController view loaded from nib"];
-}
-
 - (void)loadView {
-    if (self.contentView) {
-        self.view = self.contentView;
-    } else {
-        [super loadView];
-    }
+    [[TPLogger sharedLogger] logMessage:@"TPEventViewController loadView called"];
+    [super loadView];
     
     // Enable layer-backed view for movement visualization
     self.movementView.wantsLayer = YES;
@@ -79,6 +58,11 @@
                                        self.scrollLabel]];
 }
 
+- (void)viewDidLoad {
+    [[TPLogger sharedLogger] logMessage:@"TPEventViewController viewDidLoad called"];
+    [super viewDidLoad];
+}
+
 - (void)startMonitoring {
     if (_updateTimer) {
         [self stopMonitoring];
@@ -89,6 +73,8 @@
                                                     block:^(NSTimer * __unused timer) {
         [self updateView];
     }];
+    
+    [[TPLogger sharedLogger] logMessage:@"Started monitoring"];
 }
 
 - (void)stopMonitoring {
@@ -96,6 +82,8 @@
         [_updateTimer invalidate];
         _updateTimer = nil;
     }
+    
+    [[TPLogger sharedLogger] logMessage:@"Stopped monitoring"];
 }
 
 - (void)updateView {

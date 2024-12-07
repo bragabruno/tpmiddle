@@ -131,6 +131,15 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     }
     NSLog(@"HID Manager created successfully");
     
+    // First open the HID manager
+    IOReturn openResult = IOHIDManagerOpen(_hidManager, kIOHIDOptionsTypeNone);
+    if (openResult != kIOReturnSuccess) {
+        NSLog(@"Failed to open HID Manager with result: %d", openResult);
+        CFRelease(_hidManager);
+        _hidManager = NULL;
+        return NO;
+    }
+    
     IOHIDManagerRegisterDeviceMatchingCallback(_hidManager, Handle_DeviceMatchingCallback, (__bridge void *)self);
     IOHIDManagerRegisterDeviceRemovalCallback(_hidManager, Handle_DeviceRemovalCallback, (__bridge void *)self);
     IOHIDManagerRegisterInputValueCallback(_hidManager, Handle_IOHIDInputValueCallback, (__bridge void *)self);
@@ -141,10 +150,12 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         IOHIDManagerSetDeviceMatchingMultiple(_hidManager, (__bridge CFArrayRef)criteriaArray);
     }
     
+    // Then schedule with run loop
     IOHIDManagerScheduleWithRunLoop(_hidManager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
     NSLog(@"HID Manager scheduled with run loop");
     
     _isInitialized = YES;
+    _isRunning = YES;
     return YES;
 }
 
@@ -207,28 +218,6 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     // Set up HID manager if not already done
     if (!_isInitialized && ![self setupHIDManager]) {
         return NO;
-    }
-    
-    IOReturn result = IOHIDManagerOpen(_hidManager, kIOHIDOptionsTypeNone);
-    if (result == kIOReturnNotPermitted) {
-        if (!_waitingForPermissions) {
-            [self showPermissionAlert:@"Input monitoring permissions not granted. Please grant permission in System Settings > Privacy & Security > Input Monitoring"];
-        }
-        return NO;
-    }
-    
-    _isRunning = (result == kIOReturnSuccess);
-    
-    if (_isRunning) {
-        [[TPLogger sharedLogger] logMessage:@"HID Manager started successfully"];
-    } else {
-        NSError *error = [NSError errorWithDomain:TPHIDManagerErrorDomain
-                                           code:TPHIDManagerErrorDeviceAccessFailed
-                                       userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to start HID Manager with result: %d", result]}];
-        if ([self.delegate respondsToSelector:@selector(didEncounterError:)]) {
-            [self.delegate didEncounterError:error];
-        }
-        [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Failed to start HID manager with result: %d", result]];
     }
     
     return _isRunning;

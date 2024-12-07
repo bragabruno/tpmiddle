@@ -47,6 +47,7 @@
         _shouldKeepRunning = YES;
         
         // Start logging immediately
+        [[TPLogger sharedLogger] startLogging];
         [[TPLogger sharedLogger] logMessage:@"TPApplication initializing..."];
         
         // Initialize managers
