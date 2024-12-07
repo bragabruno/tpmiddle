@@ -7,12 +7,12 @@
 
 @interface TPEventViewController : NSViewController <TPHIDManagerDelegate>
 
-@property (weak) IBOutlet NSView *movementView;
-@property (weak) IBOutlet NSTextField *deltaLabel;
-@property (weak) IBOutlet NSTextField *scrollLabel;
-@property (weak) IBOutlet NSButton *leftButton;
-@property (weak) IBOutlet NSButton *middleButton;
-@property (weak) IBOutlet NSButton *rightButton;
+@property (strong) IBOutlet NSView *movementView;
+@property (strong) IBOutlet NSTextField *deltaLabel;
+@property (strong) IBOutlet NSTextField *scrollLabel;
+@property (strong) IBOutlet NSButton *leftButton;
+@property (strong) IBOutlet NSButton *middleButton;
+@property (strong) IBOutlet NSButton *rightButton;
 
 - (void)startMonitoring;
 - (void)stopMonitoring;

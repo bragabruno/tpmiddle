@@ -11,6 +11,8 @@
 
 @interface TPApplication () {
     BOOL _isInitialized;
+    NSLock *_stateLock;
+    dispatch_queue_t _setupQueue;
 }
 
 @property (strong) TPHIDManager *hidManager;
@@ -45,6 +47,8 @@
     if (self = [super init]) {
         _isInitialized = NO;
         _shouldKeepRunning = YES;
+        _stateLock = [[NSLock alloc] init];
+        _setupQueue = dispatch_queue_create("com.tpmiddle.application.setup", DISPATCH_QUEUE_SERIAL);
         
         // Start logging immediately
         [[TPLogger sharedLogger] startLogging];
@@ -62,57 +66,74 @@
 
 - (void)dealloc {
     [self cleanup];
+    _stateLock = nil;
+    _setupQueue = NULL;
 }
 
 - (void)hideEventViewer {
-    if (self.eventWindow) {
-        [self.eventWindow orderOut:nil];
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.eventWindow) {
+            [self.eventWindow orderOut:nil];
+        }
+    });
 }
 
 - (void)setupEventViewer {
-    if (!self.eventViewController) {
-        // Load view controller from NIB
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        NSString *nibPath = [mainBundle pathForResource:@"TPEventViewController" ofType:@"nib"];
-        if (!nibPath) {
-            [[TPLogger sharedLogger] logMessage:@"Failed to find TPEventViewController.nib"];
-            return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            if (!self.eventViewController) {
+                // Load view controller from NIB
+                NSBundle *mainBundle = [NSBundle mainBundle];
+                NSString *nibPath = [mainBundle pathForResource:@"TPEventViewController" ofType:@"nib"];
+                if (!nibPath) {
+                    [[TPLogger sharedLogger] logMessage:@"Failed to find TPEventViewController.nib"];
+                    return;
+                }
+                
+                TPEventViewController *viewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:mainBundle];
+                if (!viewController) {
+                    [[TPLogger sharedLogger] logMessage:@"Failed to initialize TPEventViewController from nib"];
+                    return;
+                }
+                
+                // Load the view to ensure outlets are connected
+                [viewController loadView];
+                self.eventViewController = viewController;
+                [[TPLogger sharedLogger] logMessage:@"TPEventViewController loaded from nib"];
+            }
+            
+            if (!self.eventWindow) {
+                NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 300)
+                                                             styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+                                                               backing:NSBackingStoreBuffered
+                                                                 defer:NO];
+                [window setContentViewController:self.eventViewController];
+                [window setTitle:@"Event Viewer"];
+                [window center];
+                self.eventWindow = window;
+            }
+        } @catch (NSException *exception) {
+            [self.errorHandler logException:exception];
         }
-        
-        self.eventViewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:mainBundle];
-        if (!self.eventViewController) {
-            [[TPLogger sharedLogger] logMessage:@"Failed to initialize TPEventViewController from nib"];
-            return;
-        }
-        
-        // Load the view to ensure outlets are connected
-        [self.eventViewController loadView];
-        [[TPLogger sharedLogger] logMessage:@"TPEventViewController loaded from nib"];
-    }
-    
-    if (!self.eventWindow) {
-        self.eventWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 300)
-                                                     styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
-                                                       backing:NSBackingStoreBuffered
-                                                         defer:NO];
-        [self.eventWindow setContentViewController:self.eventViewController];
-        [self.eventWindow setTitle:@"Event Viewer"];
-        [self.eventWindow center];
-    }
+    });
 }
 
 - (void)showEventViewer {
-    if (self.eventWindow) {
-        [self.eventWindow makeKeyAndOrderFront:nil];
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.eventWindow) {
+            [self.eventWindow makeKeyAndOrderFront:nil];
+        }
+    });
 }
 
 - (NSString *)applicationStatus {
-    return [NSString stringWithFormat:@"TPMiddle Status:\nInitialized: %@\nDebug Mode: %@\nHID Manager: %@",
-            _isInitialized ? @"Yes" : @"No",
-            [TPConfig sharedConfig].debugMode ? @"Enabled" : @"Disabled",
-            self.hidManager ? @"Running" : @"Stopped"];
+    [_stateLock lock];
+    NSString *status = [NSString stringWithFormat:@"TPMiddle Status:\nInitialized: %@\nDebug Mode: %@\nHID Manager: %@",
+                       _isInitialized ? @"Yes" : @"No",
+                       [TPConfig sharedConfig].debugMode ? @"Enabled" : @"Disabled",
+                       self.hidManager ? @"Running" : @"Stopped"];
+    [_stateLock unlock];
+    return status;
 }
 
 - (void)cleanup {
@@ -123,16 +144,19 @@
     @try {
         [[TPLogger sharedLogger] logMessage:@"TPApplication cleaning up..."];
         
-        if (self.eventWindow) {
-            [self hideEventViewer];
-            self.eventWindow = nil;
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.eventWindow) {
+                [self hideEventViewer];
+                self.eventWindow = nil;
+            }
+            
+            if (self.eventViewController) {
+                [self.eventViewController stopMonitoring];
+                self.eventViewController = nil;
+            }
+        });
         
-        if (self.eventViewController) {
-            [self.eventViewController stopMonitoring];
-            self.eventViewController = nil;
-        }
-        
+        [_stateLock lock];
         if (self.hidManager) {
             [self.hidManager stop];
             self.hidManager = nil;
@@ -144,6 +168,7 @@
         }
         
         self.statusBarController = nil;
+        [_stateLock unlock];
         
         [[TPLogger sharedLogger] stopLogging];
     } @catch (NSException *exception) {
@@ -162,34 +187,39 @@
         [[TPConfig sharedConfig] applyCommandLineArguments:arguments];
         
         // Initialize status bar first
-        self.statusBarController = [TPStatusBarController sharedController];
-        if (!self.statusBarController) {
-            [[TPLogger sharedLogger] logMessage:@"Failed to create status bar controller"];
-            [NSApp terminate:nil];
-            return;
-        }
-        self.statusBarController.delegate = self;
-        [self.statusBarController setupStatusBar];
-        
-        _isInitialized = YES;
-        [[TPLogger sharedLogger] logMessage:@"Application initialization complete"];
-        
-        // Check permissions before starting HID manager
-        NSError *permissionError = [self.permissionManager checkPermissions];
-        if (permissionError) {
-            [self.permissionManager showPermissionError:permissionError withCompletion:^(BOOL shouldRetry) {
-                if (shouldRetry) {
-                    [self start];
-                } else {
-                    self.shouldKeepRunning = NO;
-                    [NSApp terminate:nil];
-                }
-            }];
-            return;
-        }
-        
-        // Start the application
-        [self start];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.statusBarController = [TPStatusBarController sharedController];
+            if (!self.statusBarController) {
+                [[TPLogger sharedLogger] logMessage:@"Failed to create status bar controller"];
+                [NSApp terminate:nil];
+                return;
+            }
+            self.statusBarController.delegate = self;
+            [self.statusBarController setupStatusBar];
+            
+            [self->_stateLock lock];
+            self->_isInitialized = YES;
+            [self->_stateLock unlock];
+            
+            [[TPLogger sharedLogger] logMessage:@"Application initialization complete"];
+            
+            // Check permissions before starting HID manager
+            NSError *permissionError = [self.permissionManager checkPermissions];
+            if (permissionError) {
+                [self.permissionManager showPermissionError:permissionError withCompletion:^(BOOL shouldRetry) {
+                    if (shouldRetry) {
+                        [self start];
+                    } else {
+                        self.shouldKeepRunning = NO;
+                        [NSApp terminate:nil];
+                    }
+                }];
+                return;
+            }
+            
+            // Start the application
+            [self start];
+        });
     } @catch (NSException *exception) {
         [self.errorHandler logException:exception];
         [NSApp terminate:nil];
@@ -222,7 +252,11 @@
 #pragma mark - Public Methods
 
 - (void)start {
-    if (!_isInitialized) {
+    [_stateLock lock];
+    BOOL initialized = _isInitialized;
+    [_stateLock unlock];
+    
+    if (!initialized) {
         [[TPLogger sharedLogger] logMessage:@"TPApplication not properly initialized"];
         [NSApp terminate:nil];
         return;
@@ -245,10 +279,12 @@
             return;
         }
         
+        [_stateLock lock];
         // Initialize managers
         self.hidManager = [TPHIDManager sharedManager];
         if (!self.hidManager) {
             [[TPLogger sharedLogger] logMessage:@"Failed to create HID manager"];
+            [_stateLock unlock];
             [NSApp terminate:nil];
             return;
         }
@@ -257,10 +293,12 @@
         self.buttonManager = [TPButtonManager sharedManager];
         if (!self.buttonManager) {
             [[TPLogger sharedLogger] logMessage:@"Failed to create button manager"];
+            [_stateLock unlock];
             [NSApp terminate:nil];
             return;
         }
         self.buttonManager.delegate = self;
+        [_stateLock unlock];
         
         // Configure HID device matching
         [self.hidManager addDeviceMatching:kUsagePageGenericDesktop usage:kUsageMouse];
@@ -283,9 +321,11 @@
         
         // Initialize event viewer only if in debug mode
         if ([TPConfig sharedConfig].debugMode) {
-            dispatch_async(dispatch_get_main_queue(), ^{
+            dispatch_async(_setupQueue, ^{
                 [self setupEventViewer];
-                [self showEventViewer];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self showEventViewer];
+                });
             });
         }
         
@@ -303,8 +343,12 @@
 
 - (void)statusBarControllerDidToggleEventViewer:(BOOL)show {
     if (show) {
-        [self setupEventViewer];
-        [self showEventViewer];
+        dispatch_async(_setupQueue, ^{
+            [self setupEventViewer];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showEventViewer];
+            });
+        });
     } else {
         [self hideEventViewer];
     }

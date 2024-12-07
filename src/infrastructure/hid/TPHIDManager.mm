@@ -160,6 +160,32 @@
     [_delegateLock unlock];
 }
 
+- (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
+    if (!_isInitialized) return;
+    
+    [_delegateLock lock];
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [delegate didReceiveButtonPress:leftButton right:rightButton middle:middleButton];
+        });
+    }
+    [_delegateLock unlock];
+}
+
+- (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
+    if (!_isInitialized) return;
+    
+    [_delegateLock lock];
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [delegate didReceiveMovement:deltaX deltaY:deltaY withButtonState:buttons];
+        });
+    }
+    [_delegateLock unlock];
+}
+
 - (void)didReceiveHIDValue:(id)value {
     if (!_isInitialized || !_inputHandler) return;
     
