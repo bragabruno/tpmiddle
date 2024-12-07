@@ -13,11 +13,11 @@
 
 @interface TPHIDInputHandler : NSObject
 
-@property (atomic, assign) BOOL isScrollMode;
 @property (atomic, weak) id<TPHIDManagerDelegate> delegate;
 
 - (void)handleInput:(IOHIDValueRef)value;
 - (void)reset;
+- (BOOL)isMiddleButtonHeld;
 
 @end
 

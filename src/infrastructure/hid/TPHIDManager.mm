@@ -95,7 +95,7 @@
 
 - (BOOL)isScrollMode {
     if (!_isInitialized) return NO;
-    return _inputHandler.isScrollMode;
+    return [_inputHandler isMiddleButtonHeld];
 }
 
 - (BOOL)start {

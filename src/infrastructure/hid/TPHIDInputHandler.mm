@@ -8,7 +8,6 @@
     BOOL _leftButtonDown;
     BOOL _rightButtonDown;
     BOOL _middleButtonDown;
-    BOOL _isScrollMode;
     CGPoint _savedCursorPosition;
     __weak id<TPHIDManagerDelegate> _delegate;
     dispatch_queue_t _inputQueue;
@@ -22,13 +21,21 @@
 
 @implementation TPHIDInputHandler
 
-@synthesize isScrollMode = _isScrollMode;
 @synthesize delegate = _delegate;
+
+- (BOOL)isMiddleButtonHeld {
+    [_stateLock lock];
+    BOOL isHeld = _middleButtonDown;
+    [_stateLock unlock];
+    return isHeld;
+}
 
 static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType type, CGEventRef event, void *refcon) {
     TPHIDInputHandler *handler = (__bridge TPHIDInputHandler *)refcon;
-    if (handler.isScrollMode) {
-        // Block all mouse movement events in scroll mode
+    
+    // Only intercept events when middle button is held down
+    if (handler->_middleButtonDown) {
+        // Block all mouse movement events while middle button is held
         if (type == kCGEventMouseMoved || 
             type == kCGEventLeftMouseDragged || 
             type == kCGEventRightMouseDragged || 
@@ -37,35 +44,22 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
             return NULL;
         }
         
-        // For any other event in scroll mode, force cursor position
-        if (handler->_savedCursorPosition.x != 0 || handler->_savedCursorPosition.y != 0) {
-            CGEventSetLocation(event, handler->_savedCursorPosition);
-            [handler enforceCursorPosition];
-        }
+        // For any other event while middle button is held, force cursor position
+        CGEventSetLocation(event, handler->_savedCursorPosition);
+        [handler enforceCursorPosition];
     }
     return event;
 }
 
 - (void)enforceCursorPosition {
-    if (_isScrollMode && !CGPointEqualToPoint(_savedCursorPosition, CGPointZero)) {
-        // Disable mouse/cursor association
-        CGAssociateMouseAndMouseCursorPosition(false);
-        
+    if (_middleButtonDown && !CGPointEqualToPoint(_savedCursorPosition, CGPointZero)) {
         // Force cursor back to saved position
         CGWarpMouseCursorPosition(_savedCursorPosition);
-        
-        // Keep mouse/cursor dissociated while in scroll mode
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self->_isScrollMode) {
-                CGWarpMouseCursorPosition(self->_savedCursorPosition);
-            }
-        });
     }
 }
 
 - (instancetype)init {
     if (self = [super init]) {
-        _isScrollMode = NO;
         _leftButtonDown = NO;
         _rightButtonDown = NO;
         _middleButtonDown = NO;
@@ -123,7 +117,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     _leftButtonDown = NO;
     _rightButtonDown = NO;
     _middleButtonDown = NO;
-    _isScrollMode = NO;
+    _savedCursorPosition = CGPointZero;
     CGAssociateMouseAndMouseCursorPosition(true);
     [_stateLock unlock];
 }
@@ -182,22 +176,20 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
             _rightButtonDown = buttonState;
             break;
         case 3:
-            _middleButtonDown = buttonState;
             if (buttonState) {
-                // Enable scroll mode when middle button is pressed
-                _isScrollMode = YES;
-                // Save cursor position when entering scroll mode
+                // Middle button pressed
+                _middleButtonDown = YES;
+                // Save cursor position
                 CGEventRef event = CGEventCreate(NULL);
                 if (event) {
                     _savedCursorPosition = CGEventGetLocation(event);
                     CFRelease(event);
-                    // Disable mouse/cursor association and force position
-                    CGAssociateMouseAndMouseCursorPosition(false);
-                    [self enforceCursorPosition];
                 }
+                // Disable mouse/cursor association
+                CGAssociateMouseAndMouseCursorPosition(false);
             } else {
-                // Disable scroll mode when middle button is released
-                _isScrollMode = NO;
+                // Middle button released
+                _middleButtonDown = NO;
                 _savedCursorPosition = CGPointZero;
                 // Re-enable mouse/cursor association
                 CGAssociateMouseAndMouseCursorPosition(true);
@@ -223,10 +215,10 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     if (!value) return;
     
     [_stateLock lock];
-    BOOL isScrollModeActive = _isScrollMode && _middleButtonDown;
+    BOOL isMiddleButtonHeld = _middleButtonDown;
     [_stateLock unlock];
     
-    if (isScrollModeActive) {
+    if (isMiddleButtonHeld) {
         // Force cursor position
         [self enforceCursorPosition];
         
@@ -325,10 +317,10 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     }
     
     [_stateLock lock];
-    BOOL isScrollModeActive = _isScrollMode && _middleButtonDown;
+    BOOL isMiddleButtonHeld = _middleButtonDown;
     [_stateLock unlock];
     
-    if (isScrollModeActive) {
+    if (isMiddleButtonHeld) {
         [self enforceCursorPosition];
     }
     
@@ -338,7 +330,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         CFRelease(scrollEvent);
     }
     
-    if (isScrollModeActive) {
+    if (isMiddleButtonHeld) {
         [self enforceCursorPosition];
     }
 }
