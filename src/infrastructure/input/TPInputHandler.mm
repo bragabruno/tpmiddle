@@ -12,33 +12,32 @@
 }
 
 - (void)handleInput:(IOHIDValueRef)value {
-    // If in scroll mode, enforce cursor position before any input processing
-    if (self.inputState.isScrollMode) {
-        [self.inputState enforceSavedCursorPosition];
-    }
-    
     IOHIDElementRef element = IOHIDValueGetElement(value);
     uint32_t usagePage = IOHIDElementGetUsagePage(element);
     uint32_t usage = IOHIDElementGetUsage(element);
     
-    // In scroll mode, only process button and scroll inputs
-    if (self.inputState.isScrollMode) {
-        if (usagePage == kHIDPage_Button) {
-            [self handleButtonInput:value];
-        }
-        else if (usagePage == kHIDPage_GenericDesktop && usage == kHIDUsage_GD_Wheel) {
-            [self handleScrollInput:IOHIDValueGetIntegerValue(value) withHorizontal:0];
-        }
-        // Enforce cursor position after any input processing
-        [self.inputState enforceSavedCursorPosition];
-        return;
-    }
-    
-    // Normal mode processing
+    // Process button inputs first to ensure proper scroll mode state
     if (usagePage == kHIDPage_Button) {
         [self handleButtonInput:value];
     }
-    else if (usagePage == kHIDPage_GenericDesktop) {
+    
+    // Check if middle button is held down to determine scroll mode
+    BOOL shouldBeInScrollMode = self.inputState.middleButtonDown;
+    if (shouldBeInScrollMode != self.inputState.isScrollMode) {
+        if (shouldBeInScrollMode) {
+            [self.inputState enableScrollMode];
+        } else {
+            [self.inputState disableScrollMode];
+        }
+    }
+    
+    // If in scroll mode, enforce cursor position
+    if (self.inputState.isScrollMode) {
+        [self.inputState enforceSavedCursorPosition];
+    }
+    
+    // Handle other inputs based on current mode
+    if (usagePage == kHIDPage_GenericDesktop) {
         switch (usage) {
             case kHIDUsage_GD_X:
             case kHIDUsage_GD_Y:
@@ -48,6 +47,11 @@
                 [self handleScrollInput:IOHIDValueGetIntegerValue(value) withHorizontal:0];
                 break;
         }
+    }
+    
+    // Ensure cursor position is maintained in scroll mode
+    if (self.inputState.isScrollMode) {
+        [self.inputState enforceSavedCursorPosition];
     }
 }
 
@@ -64,15 +68,7 @@
             self.inputState.rightButtonDown = buttonState;
             break;
         case 3:
-            if (buttonState && !self.inputState.middleButtonDown) {
-                self.inputState.middleButtonPressTime = [NSDate date];
-                self.inputState.middleButtonDown = YES;
-            } else if (!buttonState && self.inputState.middleButtonDown) {
-                if ([[NSDate date] timeIntervalSinceDate:self.inputState.middleButtonPressTime] < 0.3) {
-                    [self.inputState toggleScrollMode];
-                }
-                self.inputState.middleButtonDown = NO;
-            }
+            // Update middle button state
             self.inputState.middleButtonDown = buttonState;
             break;
     }

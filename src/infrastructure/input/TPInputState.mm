@@ -23,7 +23,6 @@ static const uint8_t kMiddleButtonBit = 1 << 2;
         _rightButtonDown = NO;
         _middleButtonDown = NO;
         _isScrollMode = NO;
-        _middleButtonPressTime = nil;
         _savedCursorPosition = CGPointZero;
         _pendingDeltaX = 0;
         _pendingDeltaY = 0;
@@ -44,10 +43,10 @@ static const uint8_t kMiddleButtonBit = 1 << 2;
            (_middleButtonDown ? kMiddleButtonBit : 0);
 }
 
-- (void)toggleScrollMode {
-    _isScrollMode = !_isScrollMode;
-    
-    if (_isScrollMode) {
+- (void)enableScrollMode {
+    if (!_isScrollMode) {
+        _isScrollMode = YES;
+        
         // Save current cursor position when entering scroll mode
         CGEventRef event = CGEventCreate(NULL);
         if (event) {
@@ -70,9 +69,17 @@ static const uint8_t kMiddleButtonBit = 1 << 2;
                 CFRelease(moveEvent);
             }
         }
+        
+        [self resetPendingMovements];
     }
-    
-    [self resetPendingMovements];
+}
+
+- (void)disableScrollMode {
+    if (_isScrollMode) {
+        _isScrollMode = NO;
+        _savedCursorPosition = CGPointZero;
+        [self resetPendingMovements];
+    }
 }
 
 - (void)enforceSavedCursorPosition {

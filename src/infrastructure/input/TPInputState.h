@@ -11,7 +11,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL rightButtonDown;
 @property (nonatomic, assign) BOOL middleButtonDown;
 @property (nonatomic, assign) BOOL isScrollMode;
-@property (nonatomic, strong, nullable) NSDate *middleButtonPressTime;
 @property (nonatomic, assign) CGPoint savedCursorPosition;
 @property (nonatomic, assign) int pendingDeltaX;
 @property (nonatomic, assign) int pendingDeltaY;
@@ -20,7 +19,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)sharedState;
 - (void)resetPendingMovements;
 - (uint8_t)currentButtonState;
-- (void)toggleScrollMode;
+- (void)enableScrollMode;
+- (void)disableScrollMode;
 - (void)enforceSavedCursorPosition;
 
 @end
