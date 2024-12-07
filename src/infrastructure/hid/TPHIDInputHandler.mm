@@ -160,9 +160,10 @@
     @try {
         BOOL stateChanged = NO;
         
+        // Handle each button type separately to prevent cross-triggering
         switch (usage) {
             case 1: // Left button
-                if (_leftButtonDown != (BOOL)buttonState) {
+                if (!_middleButtonDown && _leftButtonDown != (BOOL)buttonState) {  // Only process left button if middle isn't down
                     _leftButtonDown = buttonState;
                     stateChanged = YES;
                 }
@@ -173,7 +174,7 @@
                     stateChanged = YES;
                 }
                 break;
-            case 3: // Middle button
+            case 3: // Middle button - handle exclusively for scroll mode
                 if (buttonState && !_middleButtonDown) {
                     _middleButtonPressTime = [NSDate date];
                     _middleButtonDown = YES;
