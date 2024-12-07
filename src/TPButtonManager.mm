@@ -11,7 +11,7 @@
 
 // Scroll configuration
 const CGFloat kMinMovementThreshold = 1.0;   // Minimum movement to trigger scroll
-const CGFloat kMaxScrollSpeed = 50.0;        // Maximum scroll speed cap
+const CGFloat kMaxScrollSpeed = 1.0;        // Maximum scroll speed cap
 
 static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType type, CGEventRef event, void *refcon) {
     if (!event || !refcon) {

@@ -87,7 +87,7 @@
         uint32_t usage = IOHIDElementGetUsage(element);
         CFIndex movement = IOHIDValueGetIntegerValue(value);
         
-        const int multiplier = 2; // Reduced from 4 to 2 for even slower scrolling
+        const int multiplier = 1; // Set to 1 for 1:1 movement to scroll
         int deltaX = 0;
         int deltaY = 0;
         
@@ -120,7 +120,7 @@
     uint32_t usage = IOHIDElementGetUsage(element);
     CFIndex movement = IOHIDValueGetIntegerValue(value);
     
-    const int multiplier = 2; // Also reduced here for consistency
+    const int multiplier = 1; // Set to 1 for 1:1 movement to scroll
     int deltaX = 0;
     int deltaY = 0;
     

@@ -279,7 +279,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     uint32_t usage = IOHIDElementGetUsage(element);
     CFIndex movement = IOHIDValueGetIntegerValue(value);
     
-    const int multiplier = 5;
+    const int multiplier = 1; // Set to 1 for 1:1 movement to scroll
     int deltaX = 0;
     int deltaY = 0;
     
