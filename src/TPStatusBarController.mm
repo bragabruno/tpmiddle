@@ -26,16 +26,8 @@
     if (self = [super init]) {
         _eventViewerVisible = NO;
         _isSetup = NO;
-        
-        // Initialize immediately
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self setupStatusBar];
-            
-            // Force an update after a short delay
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self updateModeDisplay];
-            });
-        });
+        _statusItem = nil;
+        _statusMenu = nil;
     }
     return self;
 }
@@ -48,14 +40,14 @@
     @try {
         // Create status bar item
         NSStatusBar *statusBar = [NSStatusBar systemStatusBar];
-        self.statusItem = [statusBar statusItemWithLength:NSVariableStatusItemLength];
-        if (!self.statusItem) {
+        _statusItem = [statusBar statusItemWithLength:NSVariableStatusItemLength];
+        if (!_statusItem) {
             NSLog(@"Failed to create status item");
             return;
         }
         
         // Configure button
-        NSButton *button = self.statusItem.button;
+        NSButton *button = _statusItem.button;
         if (button) {
             button.font = [NSFont systemFontOfSize:14.0];
             button.title = @"●";
@@ -66,18 +58,35 @@
         NSMenu *menu = [[NSMenu alloc] init];
         menu.autoenablesItems = NO;
         
-        [menu addItemWithTitle:@"Default Mode" action:@selector(setDefaultMode:) keyEquivalent:@""].target = self;
-        [menu addItemWithTitle:@"Normal Mode" action:@selector(setNormalMode:) keyEquivalent:@""].target = self;
+        NSMenuItem *defaultModeItem = [[NSMenuItem alloc] initWithTitle:@"Default Mode" action:@selector(setDefaultMode:) keyEquivalent:@""];
+        defaultModeItem.target = self;
+        [menu addItem:defaultModeItem];
+        
+        NSMenuItem *normalModeItem = [[NSMenuItem alloc] initWithTitle:@"Normal Mode" action:@selector(setNormalMode:) keyEquivalent:@""];
+        normalModeItem.target = self;
+        [menu addItem:normalModeItem];
+        
         [menu addItem:[NSMenuItem separatorItem]];
-        [menu addItemWithTitle:@"Show Event Viewer" action:@selector(toggleEventViewer:) keyEquivalent:@"e"].target = self;
+        
+        NSMenuItem *eventViewerItem = [[NSMenuItem alloc] initWithTitle:@"Show Event Viewer" action:@selector(toggleEventViewer:) keyEquivalent:@"e"];
+        eventViewerItem.target = self;
+        [menu addItem:eventViewerItem];
+        
         [menu addItem:[NSMenuItem separatorItem]];
-        [menu addItemWithTitle:@"Debug Mode" action:@selector(toggleDebugMode:) keyEquivalent:@""].target = self;
+        
+        NSMenuItem *debugModeItem = [[NSMenuItem alloc] initWithTitle:@"Debug Mode" action:@selector(toggleDebugMode:) keyEquivalent:@""];
+        debugModeItem.target = self;
+        [menu addItem:debugModeItem];
+        
         [menu addItem:[NSMenuItem separatorItem]];
-        [menu addItemWithTitle:@"Quit" action:@selector(quit:) keyEquivalent:@"q"].target = self;
+        
+        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit" action:@selector(quit:) keyEquivalent:@"q"];
+        quitItem.target = self;
+        [menu addItem:quitItem];
         
         // Set menu
-        self.statusItem.menu = menu;
-        self.statusMenu = menu;
+        _statusItem.menu = menu;
+        _statusMenu = menu;
         
         _isSetup = YES;
         NSLog(@"Status bar setup completed");
@@ -87,30 +96,46 @@
 }
 
 - (void)updateModeDisplay {
-    if (!self.statusItem || !self.statusItem.button) return;
+    if (!_isSetup || !_statusItem || !_statusItem.button) return;
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
-        self.statusItem.button.title = title;
-        NSLog(@"Updated status item title to: %@", title);
+        @try {
+            NSString *title = ([TPConfig sharedConfig].operationMode == TPOperationModeNormal) ? @"●" : @"○";
+            _statusItem.button.title = title;
+            NSLog(@"Updated status item title to: %@", title);
+        } @catch (NSException *exception) {
+            NSLog(@"Exception in updateModeDisplay: %@", exception);
+        }
     });
 }
 
 - (void)updateDebugState {
+    if (!_isSetup || !_statusMenu) return;
+    
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSMenuItem *debugItem = [self.statusMenu itemWithTitle:@"Debug Mode"];
-        if (debugItem) {
-            debugItem.state = [TPConfig sharedConfig].debugMode ? NSControlStateValueOn : NSControlStateValueOff;
+        @try {
+            NSMenuItem *debugItem = [_statusMenu itemWithTitle:@"Debug Mode"];
+            if (debugItem) {
+                debugItem.state = [TPConfig sharedConfig].debugMode ? NSControlStateValueOn : NSControlStateValueOff;
+            }
+        } @catch (NSException *exception) {
+            NSLog(@"Exception in updateDebugState: %@", exception);
         }
     });
 }
 
 - (void)updateEventViewerState:(BOOL)isVisible {
+    if (!_isSetup || !_statusMenu) return;
+    
     dispatch_async(dispatch_get_main_queue(), ^{
-        _eventViewerVisible = isVisible;
-        NSMenuItem *item = [self.statusMenu itemWithTitle:isVisible ? @"Hide Event Viewer" : @"Show Event Viewer"];
-        if (item) {
-            item.title = isVisible ? @"Hide Event Viewer" : @"Show Event Viewer";
+        @try {
+            _eventViewerVisible = isVisible;
+            NSMenuItem *item = [_statusMenu itemWithTitle:isVisible ? @"Hide Event Viewer" : @"Show Event Viewer"];
+            if (item) {
+                item.title = isVisible ? @"Hide Event Viewer" : @"Show Event Viewer";
+            }
+        } @catch (NSException *exception) {
+            NSLog(@"Exception in updateEventViewerState: %@", exception);
         }
     });
 }
@@ -118,30 +143,35 @@
 #pragma mark - Menu Actions
 
 - (void)setDefaultMode:(id)sender {
+    if (!_isSetup) return;
     [TPConfig sharedConfig].operationMode = TPOperationModeDefault;
     [[TPConfig sharedConfig] saveToDefaults];
     [self updateModeDisplay];
 }
 
 - (void)setNormalMode:(id)sender {
+    if (!_isSetup) return;
     [TPConfig sharedConfig].operationMode = TPOperationModeNormal;
     [[TPConfig sharedConfig] saveToDefaults];
     [self updateModeDisplay];
 }
 
 - (void)toggleEventViewer:(id)sender {
+    if (!_isSetup) return;
     if ([self.delegate respondsToSelector:@selector(statusBarControllerDidToggleEventViewer:)]) {
         [self.delegate statusBarControllerDidToggleEventViewer:!_eventViewerVisible];
     }
 }
 
 - (void)toggleDebugMode:(id)sender {
+    if (!_isSetup) return;
     [TPConfig sharedConfig].debugMode = ![TPConfig sharedConfig].debugMode;
     [[TPConfig sharedConfig] saveToDefaults];
     [self updateDebugState];
 }
 
 - (void)quit:(id)sender {
+    if (!_isSetup) return;
     if ([self.delegate respondsToSelector:@selector(statusBarControllerWillQuit)]) {
         [self.delegate statusBarControllerWillQuit];
     }

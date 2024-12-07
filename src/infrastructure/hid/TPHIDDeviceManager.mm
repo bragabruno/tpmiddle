@@ -32,6 +32,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         _isRunning = NO;
         _isInitialized = NO;
         _waitingForPermissions = NO;
+        _hidManager = NULL;
     }
     return self;
 }
@@ -283,6 +284,8 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     
     @synchronized(_devices) {
         if (![_devices containsObject:(__bridge id)device]) {
+            // Retain the device
+            CFRetain(device);
             [_devices addObject:(__bridge id)device];
             
             NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
@@ -305,6 +308,9 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
         if ([_devices containsObject:(__bridge id)device]) {
             NSString *product = (__bridge_transfer NSString *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
             [_devices removeObject:(__bridge id)device];
+            
+            // Release the device
+            CFRelease(device);
             
             NSLog(@"Device removed - Product: %@", product);
             

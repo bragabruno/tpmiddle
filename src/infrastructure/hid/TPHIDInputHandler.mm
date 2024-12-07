@@ -13,6 +13,7 @@
     NSDate *_lastMovementTime;
     CGPoint _savedCursorPosition;
     dispatch_queue_t _eventQueue;
+    NSLock *_stateLock;
 }
 @end
 
@@ -23,28 +24,33 @@
 - (instancetype)init {
     if (self = [super init]) {
         _isScrollMode = NO;
+        _leftButtonDown = NO;
+        _rightButtonDown = NO;
+        _middleButtonDown = NO;
         _pendingDeltaX = 0;
         _pendingDeltaY = 0;
         _lastMovementTime = [NSDate date];
         _savedCursorPosition = CGPointZero;
         _eventQueue = dispatch_queue_create("com.tpmiddle.inputQueue", DISPATCH_QUEUE_SERIAL);
+        _stateLock = [[NSLock alloc] init];
     }
     return self;
 }
 
 - (void)dealloc {
-    if (_eventQueue) {
-        _eventQueue = NULL;
-    }
+    _eventQueue = NULL;
+    _stateLock = nil;
 }
 
 - (void)reset {
+    [_stateLock lock];
     _leftButtonDown = NO;
     _rightButtonDown = NO;
     _middleButtonDown = NO;
     _isScrollMode = NO;
     _pendingDeltaX = 0;
     _pendingDeltaY = 0;
+    [_stateLock unlock];
 }
 
 - (void)handleInput:(IOHIDValueRef)value {
@@ -83,6 +89,7 @@
     uint32_t usage = IOHIDElementGetUsage(element);
     CFIndex buttonState = IOHIDValueGetIntegerValue(value);
     
+    [_stateLock lock];
     switch (usage) {
         case 1: // Left button
             _leftButtonDown = buttonState;
@@ -99,11 +106,13 @@
                 if (pressDuration < 0.3) {
                     _isScrollMode = !_isScrollMode;
                     if (_isScrollMode) {
-                        CGEventRef event = CGEventCreate(NULL);
-                        if (event) {
-                            _savedCursorPosition = CGEventGetLocation(event);
-                            CFRelease(event);
-                        }
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            CGEventRef event = CGEventCreate(NULL);
+                            if (event) {
+                                self->_savedCursorPosition = CGEventGetLocation(event);
+                                CFRelease(event);
+                            }
+                        });
                     }
                 }
                 _middleButtonDown = NO;
@@ -113,8 +122,15 @@
             break;
     }
     
+    BOOL leftDown = _leftButtonDown;
+    BOOL rightDown = _rightButtonDown;
+    BOOL middleDown = _middleButtonDown;
+    [_stateLock unlock];
+    
     if ([self.delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
-        [self.delegate didReceiveButtonPress:_leftButtonDown right:_rightButtonDown middle:_middleButtonDown];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.delegate didReceiveButtonPress:leftDown right:rightDown middle:middleDown];
+        });
     }
 }
 
@@ -127,6 +143,7 @@
     uint32_t usage = IOHIDElementGetUsage(element);
     CFIndex movement = IOHIDValueGetIntegerValue(value);
     
+    [_stateLock lock];
     if (usage == kHIDUsage_GD_X) {
         _pendingDeltaX = -(int)movement;
     }
@@ -140,13 +157,24 @@
                          (_rightButtonDown ? kRightButtonBit : 0) | 
                          (_middleButtonDown ? kMiddleButtonBit : 0);
         
-        if (_isScrollMode && !_middleButtonDown) {
-            if (_pendingDeltaX != 0 || _pendingDeltaY != 0) {
-                [self handleScrollInput:_pendingDeltaY withHorizontal:_pendingDeltaX];
+        int deltaX = _pendingDeltaX;
+        int deltaY = _pendingDeltaY;
+        BOOL scrollMode = _isScrollMode;
+        BOOL middleDown = _middleButtonDown;
+        CGPoint cursorPos = _savedCursorPosition;
+        
+        _pendingDeltaX = 0;
+        _pendingDeltaY = 0;
+        _lastMovementTime = [NSDate date];
+        [_stateLock unlock];
+        
+        if (scrollMode && !middleDown) {
+            if (deltaX != 0 || deltaY != 0) {
+                [self handleScrollInput:deltaY withHorizontal:deltaX];
                 
-                dispatch_sync(_eventQueue, ^{
+                dispatch_async(dispatch_get_main_queue(), ^{
                     CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
-                                                               _savedCursorPosition,
+                                                               cursorPos,
                                                                kCGMouseButtonLeft);
                     if (moveEvent) {
                         CGEventPost(kCGHIDEventTap, moveEvent);
@@ -155,16 +183,16 @@
                 });
             }
         } else {
-            if (_pendingDeltaX != 0 || _pendingDeltaY != 0) {
+            if (deltaX != 0 || deltaY != 0) {
                 if ([self.delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
-                    [self.delegate didReceiveMovement:_pendingDeltaX deltaY:_pendingDeltaY withButtonState:buttons];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self.delegate didReceiveMovement:deltaX deltaY:deltaY withButtonState:buttons];
+                    });
                 }
             }
         }
-        
-        _pendingDeltaX = 0;
-        _pendingDeltaY = 0;
-        _lastMovementTime = [NSDate date];
+    } else {
+        [_stateLock unlock];
     }
 }
 
@@ -176,7 +204,7 @@
 }
 
 - (void)handleScrollInput:(int)verticalDelta withHorizontal:(int)horizontalDelta {
-    dispatch_sync(_eventQueue, ^{
+    dispatch_async(dispatch_get_main_queue(), ^{
         CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
             NULL,
             kCGScrollEventUnitPixel,
