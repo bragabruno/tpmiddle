@@ -1,13 +1,20 @@
 #import <Cocoa/Cocoa.h>
 #import "TPApplication.h"
 
-int main(int argc __unused, const char * argv[] __unused) {
+int main(int argc, const char * argv[]) {
     @autoreleasepool {
-        [NSApplication sharedApplication];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        // Set up the application delegate
         TPApplication *delegate = [TPApplication sharedApplication];
         [NSApp setDelegate:delegate];
-        [NSApp run];
+        
+        // Configure the application
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        
+        // Set as agent application (no dock icon)
+        ProcessSerialNumber psn = { 0, kCurrentProcess };
+        TransformProcessType(&psn, kProcessTransformToUIElementApplication);
+        
+        // Run the application
+        return NSApplicationMain(argc, argv);
     }
-    return 0;
 }

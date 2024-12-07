@@ -152,8 +152,6 @@
             return;
         }
         self.statusBarController.delegate = self;
-        
-        // Setup status bar UI
         [self.statusBarController setupStatusBar];
         
         _isInitialized = YES;
@@ -173,10 +171,8 @@
             return;
         }
         
-        // Start the application after a brief delay to ensure run loop is ready
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self start];
-        });
+        // Start the application
+        [self start];
     } @catch (NSException *exception) {
         [self.errorHandler logException:exception];
         [NSApp terminate:nil];
@@ -284,6 +280,22 @@
             [NSApp terminate:nil];
         }
     }
+}
+
+#pragma mark - TPStatusBarControllerDelegate
+
+- (void)statusBarControllerDidToggleEventViewer:(BOOL)show {
+    if (show) {
+        [self setupEventViewer];
+        [self showEventViewer];
+    } else {
+        [self hideEventViewer];
+    }
+    [self.statusBarController updateEventViewerState:show];
+}
+
+- (void)statusBarControllerWillQuit {
+    self.shouldKeepRunning = NO;
 }
 
 @end

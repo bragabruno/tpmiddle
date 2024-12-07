@@ -57,7 +57,7 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
             // Open System Settings
             if ([message containsString:@"Accessibility"]) {
                 [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
-            } else if ([message containsString:@"Input Monitoring"]) {
+            } else {
                 [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
             }
             
@@ -210,16 +210,18 @@ static void Handle_IOHIDInputValueCallback(void *context, IOReturn result, void 
     }
     
     IOReturn result = IOHIDManagerOpen(_hidManager, kIOHIDOptionsTypeNone);
+    if (result == kIOReturnNotPermitted) {
+        if (!_waitingForPermissions) {
+            [self showPermissionAlert:@"Input monitoring permissions not granted. Please grant permission in System Settings > Privacy & Security > Input Monitoring"];
+        }
+        return NO;
+    }
+    
     _isRunning = (result == kIOReturnSuccess);
     
     if (_isRunning) {
         [[TPLogger sharedLogger] logMessage:@"HID Manager started successfully"];
     } else {
-        if (result == kIOReturnNotPermitted && !_waitingForPermissions) {
-            [self showPermissionAlert:@"Input monitoring permissions not granted. Please grant permission in System Settings > Privacy & Security > Input Monitoring"];
-            return NO;
-        }
-        
         NSError *error = [NSError errorWithDomain:TPHIDManagerErrorDomain
                                            code:TPHIDManagerErrorDeviceAccessFailed
                                        userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to start HID Manager with result: %d", result]}];

@@ -1,6 +1,6 @@
 #import "TPStatusReporter.h"
 #import "TPLogger.h"
-#import "TPHIDManager.h"
+#import "infrastructure/hid/TPHIDManager.h"
 
 @implementation TPStatusReporter
 
@@ -13,43 +13,31 @@
     return sharedReporter;
 }
 
-- (NSString *)applicationStatus:(BOOL)isInitialized 
-                     debugMode:(BOOL)debugMode 
-                   hidManager:(TPHIDManager *)hidManager {
-    NSMutableString *status = [NSMutableString string];
-    [status appendString:@"=== TPMiddle Status ===\n"];
-    [status appendFormat:@"Initialized: %@\n", isInitialized ? @"Yes" : @"No"];
-    [status appendFormat:@"Debug Mode: %@\n", debugMode ? @"Enabled" : @"Disabled"];
-    
-    if (hidManager) {
-        [status appendString:[hidManager deviceStatus]];
-    }
-    
-    [status appendString:@"===================\n"];
-    return status;
-}
-
 - (void)logSystemInfo {
     NSProcessInfo *processInfo = [NSProcessInfo processInfo];
-    NSString *systemInfo = [NSString stringWithFormat:@"System Information:\n"
-                           "OS Version: %@\n"
-                           "Process Name: %@\n"
-                           "Process ID: %d\n"
-                           "Physical Memory: %.2f GB\n"
-                           "Number of Processors: %lu\n"
-                           "Active Processor Count: %lu\n"
-                           "Thermal State: %ld\n"
-                           "Low Power Mode Enabled: %@",
-                           processInfo.operatingSystemVersionString,
-                           processInfo.processName,
-                           processInfo.processIdentifier,
-                           processInfo.physicalMemory / (1024.0 * 1024.0 * 1024.0),
-                           (unsigned long)processInfo.processorCount,
-                           (unsigned long)processInfo.activeProcessorCount,
-                           (long)processInfo.thermalState,
-                           processInfo.lowPowerModeEnabled ? @"Yes" : @"No"];
+    NSOperatingSystemVersion osVersion = [processInfo operatingSystemVersion];
     
-    [[TPLogger sharedLogger] logMessage:systemInfo];
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"System Info:\n"
+                                       "OS Version: %ld.%ld.%ld\n"
+                                       "Physical Memory: %.2f GB\n"
+                                       "Processor Count: %lu\n"
+                                       "Active Processor Count: %lu",
+                                       osVersion.majorVersion,
+                                       osVersion.minorVersion,
+                                       osVersion.patchVersion,
+                                       [processInfo physicalMemory] / (1024.0 * 1024.0 * 1024.0),
+                                       (unsigned long)[processInfo processorCount],
+                                       (unsigned long)[processInfo activeProcessorCount]]];
+}
+
+- (NSString *)applicationStatus:(BOOL)isInitialized debugMode:(BOOL)debugMode hidManager:(TPHIDManager *)hidManager {
+    return [NSString stringWithFormat:@"Application Status:\n"
+            "Initialized: %@\n"
+            "Debug Mode: %@\n"
+            "HID Manager: %@",
+            isInitialized ? @"Yes" : @"No",
+            debugMode ? @"Enabled" : @"Disabled",
+            hidManager ? @"Running" : @"Stopped"];
 }
 
 @end
