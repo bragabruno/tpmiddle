@@ -36,6 +36,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     BOOL _middlePressed;
     NSDate *_leftDownTime;
     NSDate *_rightDownTime;
+    CGPoint _lastLocation;
     
     // Scroll state
     CGFloat _accumulatedDeltaX;
@@ -72,6 +73,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         _eventQueue = dispatch_queue_create("com.tpmiddle.buttonManager.event", DISPATCH_QUEUE_SERIAL);
         _delegateQueue = dispatch_queue_create("com.tpmiddle.buttonManager.delegate", DISPATCH_QUEUE_SERIAL);
         dispatch_set_target_queue(_eventQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+        _lastLocation = CGPointZero;
         [self reset];
         [self setupEventTap];
     }
@@ -151,10 +153,25 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         switch (type) {
             case kCGEventMouseMoved:
                 if (_middlePressed || _middleEmulated) {
-                    CGPoint delta = CGEventGetLocation(event);
-                    [_stateLock unlock];
-                    [self handleMovement:(int)delta.x deltaY:(int)delta.y withButtonState:0];
-                    return NULL; // Consume the event
+                    CGPoint currentLocation = CGEventGetLocation(event);
+                    
+                    if (_lastLocation.x == 0 && _lastLocation.y == 0) {
+                        _lastLocation = currentLocation;
+                        [_stateLock unlock];
+                        return NULL;
+                    }
+                    
+                    // Calculate movement delta
+                    int deltaX = (int)(currentLocation.x - _lastLocation.x);
+                    int deltaY = (int)(_lastLocation.y - currentLocation.y); // Flip Y for natural scrolling
+                    
+                    _lastLocation = currentLocation;
+                    
+                    if (deltaX != 0 || deltaY != 0) {
+                        [_stateLock unlock];
+                        [self handleMovement:deltaX deltaY:deltaY withButtonState:0];
+                        return NULL; // Consume the event
+                    }
                 }
                 break;
                 
@@ -201,8 +218,6 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     return event;
 }
 
-#pragma mark - Public Methods
-
 - (void)updateButtonStates:(BOOL)leftDown right:(BOOL)rightDown middle:(BOOL)middleDown {
     [_stateLock lock];
     @try {
@@ -216,6 +231,14 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 // Reset scroll state when middle button is released
                 _accumulatedDeltaX = 0;
                 _accumulatedDeltaY = 0;
+                _lastLocation = CGPointZero;
+            } else {
+                // Get initial cursor position when middle button is pressed
+                CGEventRef event = CGEventCreate(NULL);
+                if (event) {
+                    _lastLocation = CGEventGetLocation(event);
+                    CFRelease(event);
+                }
             }
             // Notify delegate of state change without generating click events
             [self notifyDelegateOfMiddleButtonState:middleDown];
@@ -262,6 +285,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
             // Reset scroll state
             _accumulatedDeltaX = 0;
             _accumulatedDeltaY = 0;
+            _lastLocation = CGPointZero;
         }
     } @catch (NSException *exception) {
         NSLog(@"Exception in updateButtonStates: %@", exception);
@@ -287,9 +311,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     CGFloat speed = sqrt(deltaX * deltaX + deltaY * deltaY);
     CGFloat accelerationFactor = 1.0 + (speed * config.scrollAcceleration * timeDelta);
     
-    // Invert the movement values for natural scrolling direction
-    CGFloat adjustedDeltaX = -deltaX;
-    CGFloat adjustedDeltaY = -deltaY;
+    // Use raw movement values
+    CGFloat adjustedDeltaX = deltaX;
+    CGFloat adjustedDeltaY = deltaY;
     
     [_stateLock lock];
     // Accumulate movement with acceleration and speed multiplier
@@ -326,6 +350,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     _middlePressed = NO;
     _leftDownTime = nil;
     _rightDownTime = nil;
+    _lastLocation = CGPointZero;
     
     // Reset scroll state
     _accumulatedDeltaX = 0;
@@ -371,7 +396,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     @try {
         dispatch_async(_eventQueue, ^{
             @try {
-                // Create scroll event with natural scrolling
+                // Create scroll event with simple configuration
                 CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
                     NULL,
                     kCGScrollEventUnitPixel,
@@ -381,7 +406,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 );
                 
                 if (scrollEvent) {
-                    // Set the phase to ensure consistent behavior
+                    // Set only the continuous flag
                     CGEventSetIntegerValueField(scrollEvent, kCGScrollWheelEventIsContinuous, 1);
                     
                     // Post the event
