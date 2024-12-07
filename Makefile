@@ -71,7 +71,7 @@ $(BIN_DIR)/$(TARGET): $(BUILD_DIR) $(BIN_DIR) $(OBJECTS)
 
 # Compile .xib to .nib
 resources/TPEventViewController.nib: resources/TPEventViewController.xib
-	ibtool --compile $@ $<
+	ibtool --compile $@ $< --module tpmiddle
 
 # Create and sign the app bundle
 app: $(BIN_DIR)/$(TARGET) resources/TPEventViewController.nib

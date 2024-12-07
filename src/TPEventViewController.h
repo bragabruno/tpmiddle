@@ -10,6 +10,9 @@
 @property (weak) IBOutlet NSView *movementView;
 @property (weak) IBOutlet NSTextField *deltaLabel;
 @property (weak) IBOutlet NSTextField *scrollLabel;
+@property (weak) IBOutlet NSButton *leftButton;
+@property (weak) IBOutlet NSButton *middleButton;
+@property (weak) IBOutlet NSButton *rightButton;
 
 - (void)startMonitoring;
 - (void)stopMonitoring;

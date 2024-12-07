@@ -71,7 +71,23 @@
 
 - (void)setupEventViewer {
     if (!self.eventViewController) {
-        self.eventViewController = [[TPEventViewController alloc] init];
+        // Load view controller from NIB
+        NSBundle *mainBundle = [NSBundle mainBundle];
+        NSString *nibPath = [mainBundle pathForResource:@"TPEventViewController" ofType:@"nib"];
+        if (!nibPath) {
+            [[TPLogger sharedLogger] logMessage:@"Failed to find TPEventViewController.nib"];
+            return;
+        }
+        
+        self.eventViewController = [[TPEventViewController alloc] initWithNibName:@"TPEventViewController" bundle:mainBundle];
+        if (!self.eventViewController) {
+            [[TPLogger sharedLogger] logMessage:@"Failed to initialize TPEventViewController from nib"];
+            return;
+        }
+        
+        // Load the view to ensure outlets are connected
+        [self.eventViewController loadView];
+        [[TPLogger sharedLogger] logMessage:@"TPEventViewController loaded from nib"];
     }
     
     if (!self.eventWindow) {

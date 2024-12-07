@@ -11,12 +11,15 @@
     NSPoint _deltaPoint;
     uint8_t _buttonState;
 }
+
+@property (nonatomic, strong) NSView *contentView;
+
 @end
 
 @implementation TPEventViewController
 
-- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
-    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+- (instancetype)init {
+    self = [super init];
     if (self) {
         _hidManager = [TPHIDManager sharedManager];
         _hidManager.delegate = self;
@@ -24,12 +27,46 @@
         _currentPoint = NSZeroPoint;
         _deltaPoint = NSZeroPoint;
         _buttonState = 0;
+        
+        [self loadCustomView];
     }
     return self;
 }
 
+- (void)loadCustomView {
+    NSArray *topLevelObjects = nil;
+    NSNib *nib = [[NSNib alloc] initWithNibNamed:@"TPEventViewController" bundle:[NSBundle mainBundle]];
+    if (![nib instantiateWithOwner:self topLevelObjects:&topLevelObjects]) {
+        [[TPLogger sharedLogger] logMessage:@"Failed to load TPEventViewController.nib"];
+        return;
+    }
+    
+    // Find the main view in top level objects
+    for (id object in topLevelObjects) {
+        if ([object isKindOfClass:[NSView class]]) {
+            self.contentView = object;
+            break;
+        }
+    }
+    
+    if (!self.contentView) {
+        [[TPLogger sharedLogger] logMessage:@"Failed to find main view in nib"];
+        return;
+    }
+    
+    [[TPLogger sharedLogger] logMessage:@"TPEventViewController view loaded from nib"];
+}
+
 - (void)loadView {
-    [super loadView];
+    if (self.contentView) {
+        self.view = self.contentView;
+    } else {
+        [super loadView];
+    }
+    
+    // Enable layer-backed view for movement visualization
+    self.movementView.wantsLayer = YES;
+    self.movementView.layer.backgroundColor = NSColor.clearColor.CGColor;
     
     if (!self.movementView || !self.deltaLabel || !self.scrollLabel) {
         [[TPLogger sharedLogger] logMessage:@"Failed to load view outlets"];
