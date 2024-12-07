@@ -33,13 +33,11 @@
         dispatch_set_target_queue(_delegateQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
         
         @try {
-            // Initialize input handler first
             _inputHandler = [[TPHIDInputHandler alloc] init];
             if (!_inputHandler) {
                 return nil;
             }
             
-            // Then initialize device manager
             _deviceManager = [[TPHIDDeviceManager alloc] init];
             if (!_deviceManager) {
                 _inputHandler = nil;
@@ -76,245 +74,113 @@
 }
 
 - (void)setDelegate:(id<TPHIDManagerDelegate>)delegate {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
-    [_delegateLock lock];
+    if (!_isInitialized) return;
     _inputHandler.delegate = delegate;
-    [_delegateLock unlock];
 }
 
 - (id<TPHIDManagerDelegate>)delegate {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return nil;
-    
-    [_delegateLock lock];
-    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-    [_delegateLock unlock];
-    return delegate;
+    if (!_isInitialized) return nil;
+    return _inputHandler.delegate;
 }
 
 - (NSArray *)devices {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return @[];
+    if (!_isInitialized) return @[];
     return [_deviceManager.devices copy];
 }
 
 - (BOOL)isRunning {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return NO;
+    if (!_isInitialized) return NO;
     return _deviceManager.isRunning;
 }
 
 - (BOOL)isScrollMode {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return NO;
+    if (!_isInitialized) return NO;
     return _inputHandler.isScrollMode;
 }
 
 - (BOOL)start {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return NO;
+    if (!_isInitialized) return NO;
     return [_deviceManager start];
 }
 
 - (void)stop {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
+    if (!_isInitialized) return;
     [_deviceManager stop];
     [_inputHandler reset];
 }
 
 - (void)addDeviceMatching:(uint32_t)usagePage usage:(uint32_t)usage {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
+    if (!_isInitialized) return;
     [_deviceManager addDeviceMatching:usagePage usage:usage];
 }
 
 - (void)addVendorMatching:(uint32_t)vendorID {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
+    if (!_isInitialized) return;
     [_deviceManager addVendorMatching:vendorID];
 }
 
 - (NSString *)deviceStatus {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return @"Not initialized";
+    if (!_isInitialized) return @"Not initialized";
     return [_deviceManager deviceStatus];
 }
 
 - (NSString *)currentConfiguration {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return @"Not initialized";
+    if (!_isInitialized) return @"Not initialized";
     return [_deviceManager currentConfiguration];
-}
-
-#pragma mark - Private Methods
-
-- (void)notifyDelegateOnMainQueue:(dispatch_block_t)block {
-    if (!block) return;
-    
-    [_delegateLock lock];
-    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-    [_delegateLock unlock];
-    
-    if (!delegate) return;
-    
-    dispatch_async(_delegateQueue, ^{
-        @try {
-            block();
-        } @catch (NSException *exception) {
-            [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in delegate notification: %@", exception]];
-        }
-    });
 }
 
 #pragma mark - TPHIDManagerDelegate
 
 - (void)didDetectDeviceAttached:(NSString *)deviceInfo {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
-    [self notifyDelegateOnMainQueue:^{
-        [_delegateLock lock];
-        id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-        if ([delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
-            [delegate didDetectDeviceAttached:deviceInfo];
-        }
-        [_delegateLock unlock];
-    }];
+    if (!_isInitialized) return;
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didDetectDeviceAttached:)]) {
+        [delegate didDetectDeviceAttached:deviceInfo];
+    }
 }
 
 - (void)didDetectDeviceDetached:(NSString *)deviceInfo {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
-    [self notifyDelegateOnMainQueue:^{
-        [_delegateLock lock];
-        id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-        if ([delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
-            [delegate didDetectDeviceDetached:deviceInfo];
-        }
-        [_delegateLock unlock];
-    }];
-    
+    if (!_isInitialized) return;
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didDetectDeviceDetached:)]) {
+        [delegate didDetectDeviceDetached:deviceInfo];
+    }
     [_inputHandler reset];
 }
 
 - (void)didEncounterError:(NSError *)error {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
-    [self notifyDelegateOnMainQueue:^{
-        [_delegateLock lock];
-        id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-        if ([delegate respondsToSelector:@selector(didEncounterError:)]) {
-            [delegate didEncounterError:error];
-        }
-        [_delegateLock unlock];
-    }];
+    if (!_isInitialized) return;
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didEncounterError:)]) {
+        [delegate didEncounterError:error];
+    }
 }
 
 - (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
-    [self notifyDelegateOnMainQueue:^{
-        [_delegateLock lock];
-        id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-        if ([delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
-            [delegate didReceiveButtonPress:leftButton right:rightButton middle:middleButton];
-        }
-        [_delegateLock unlock];
-    }];
+    if (!_isInitialized) return;
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
+        [delegate didReceiveButtonPress:leftButton right:rightButton middle:middleButton];
+    }
 }
 
 - (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized) return;
-    
-    [self notifyDelegateOnMainQueue:^{
-        [_delegateLock lock];
-        id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
-        if ([delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
-            [delegate didReceiveMovement:deltaX deltaY:deltaY withButtonState:buttons];
-        }
-        [_delegateLock unlock];
-    }];
+    if (!_isInitialized) return;
+    id<TPHIDManagerDelegate> delegate = _inputHandler.delegate;
+    if ([delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
+        [delegate didReceiveMovement:deltaX deltaY:deltaY withButtonState:buttons];
+    }
 }
 
 - (void)didReceiveHIDValue:(id)value {
-    [_stateLock lock];
-    BOOL initialized = _isInitialized;
-    [_stateLock unlock];
-    
-    if (!initialized || !_inputHandler) return;
+    if (!_isInitialized || !_inputHandler) return;
     
     @try {
-        // Create a local strong reference to the value
         IOHIDValueRef hidValue = (__bridge IOHIDValueRef)value;
         if (!hidValue) return;
         
-        // Retain the value before passing it to the handler
-        CFRetain(hidValue);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            @try {
-                [self->_inputHandler handleInput:hidValue];
-            } @catch (NSException *exception) {
-                [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception handling HID value: %@", exception]];
-            } @finally {
-                CFRelease(hidValue);
-            }
-        });
+        // Process HID value immediately without dispatch
+        [_inputHandler handleInput:hidValue];
     } @catch (NSException *exception) {
         [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Exception in didReceiveHIDValue: %@", exception]];
     }

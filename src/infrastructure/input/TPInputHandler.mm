@@ -28,8 +28,6 @@
             case kHIDUsage_GD_Wheel:
                 [self handleScrollInput:IOHIDValueGetIntegerValue(value) withHorizontal:0];
                 break;
-            default:
-                break;
         }
     }
 }
@@ -40,37 +38,25 @@
     CFIndex buttonState = IOHIDValueGetIntegerValue(value);
     
     switch (usage) {
-        case 1: // Left button
+        case 1:
             self.inputState.leftButtonDown = buttonState;
             break;
-        case 2: // Right button
+        case 2:
             self.inputState.rightButtonDown = buttonState;
             break;
-        case 3: // Middle button
+        case 3:
             if (buttonState && !self.inputState.middleButtonDown) {
-                // Middle button just pressed
                 self.inputState.middleButtonPressTime = [NSDate date];
                 self.inputState.middleButtonDown = YES;
             } else if (!buttonState && self.inputState.middleButtonDown) {
-                // Middle button just released
-                NSTimeInterval pressDuration = [[NSDate date] timeIntervalSinceDate:self.inputState.middleButtonPressTime];
-                if (pressDuration < 0.3) {
+                if ([[NSDate date] timeIntervalSinceDate:self.inputState.middleButtonPressTime] < 0.3) {
                     [self.inputState toggleScrollMode];
-                    
-                    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Scroll mode %@", 
-                        self.inputState.isScrollMode ? @"enabled" : @"disabled"]];
                 }
                 self.inputState.middleButtonDown = NO;
             }
             self.inputState.middleButtonDown = buttonState;
             break;
-        default:
-            break;
     }
-    
-    [[TPLogger sharedLogger] logButtonEvent:self.inputState.leftButtonDown 
-                                    right:self.inputState.rightButtonDown 
-                                   middle:self.inputState.middleButtonDown];
     
     if ([self.delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
         [self.delegate didReceiveButtonPress:self.inputState.leftButtonDown 
@@ -84,66 +70,52 @@
     uint32_t usage = IOHIDElementGetUsage(element);
     CFIndex movement = IOHIDValueGetIntegerValue(value);
     
-    // Store the movement in the appropriate pending delta
+    // Extreme multiplier for instant response
+    const int multiplier = 12;
+    
+    int deltaX = 0;
+    int deltaY = 0;
+    
     if (usage == kHIDUsage_GD_X) {
-        self.inputState.pendingDeltaX = -(int)movement;  // Invert X for natural movement
+        deltaX = -(int)movement * multiplier;
     }
     else if (usage == kHIDUsage_GD_Y) {
-        self.inputState.pendingDeltaY = -(int)movement;  // Invert Y for natural movement
+        deltaY = -(int)movement * multiplier;
     }
     
-    // Check if we should process the movement
-    NSTimeInterval timeSinceLastMovement = [[NSDate date] timeIntervalSinceDate:self.inputState.lastMovementTime];
-    if (timeSinceLastMovement >= 0.001) { // Process movements every millisecond
-        if (self.inputState.isScrollMode && !self.inputState.middleButtonDown) {
-            // In scroll mode, convert movement to scroll events
-            if (self.inputState.pendingDeltaX != 0 || self.inputState.pendingDeltaY != 0) {
-                [self handleScrollInput:self.inputState.pendingDeltaY 
-                       withHorizontal:self.inputState.pendingDeltaX];
-                
-                // Keep cursor at saved position during scroll mode
-                CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
-                                                             self.inputState.savedCursorPosition,
-                                                             kCGMouseButtonLeft);
+    if (self.inputState.isScrollMode && !self.inputState.middleButtonDown) {
+        if (deltaX != 0 || deltaY != 0) {
+            CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, deltaY, deltaX);
+            if (scrollEvent) {
+                CGEventPost(kCGHIDEventTap, scrollEvent);
+                CFRelease(scrollEvent);
+            }
+            
+            // Keep cursor fixed
+            CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+                                                         self.inputState.savedCursorPosition,
+                                                         kCGMouseButtonLeft);
+            if (moveEvent) {
                 CGEventPost(kCGHIDEventTap, moveEvent);
                 CFRelease(moveEvent);
             }
-        } else {
-            // Normal pointer movement
-            if (self.inputState.pendingDeltaX != 0 || self.inputState.pendingDeltaY != 0) {
-                uint8_t buttons = [self.inputState currentButtonState];
-                
-                [[TPLogger sharedLogger] logTrackpointMovement:self.inputState.pendingDeltaX 
-                                                      deltaY:self.inputState.pendingDeltaY 
-                                                    buttons:buttons];
-                
-                if ([self.delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
-                    [self.delegate didReceiveMovement:self.inputState.pendingDeltaX 
-                                            deltaY:self.inputState.pendingDeltaY 
-                                  withButtonState:buttons];
-                }
+        }
+    } else {
+        if (deltaX != 0 || deltaY != 0) {
+            if ([self.delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
+                [self.delegate didReceiveMovement:deltaX 
+                                        deltaY:deltaY 
+                              withButtonState:[self.inputState currentButtonState]];
             }
         }
-        
-        [self.inputState resetPendingMovements];
     }
 }
 
 - (void)handleScrollInput:(int)verticalDelta withHorizontal:(int)horizontalDelta {
-    // Create and post scroll wheel event
-    CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(
-        NULL,
-        kCGScrollEventUnitPixel,
-        2,  // number of axes
-        verticalDelta,
-        horizontalDelta
-    );
-    
+    CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, verticalDelta, horizontalDelta);
     if (scrollEvent) {
         CGEventPost(kCGHIDEventTap, scrollEvent);
         CFRelease(scrollEvent);
-        
-        [[TPLogger sharedLogger] logScrollEvent:horizontalDelta deltaY:verticalDelta];
     }
 }
 
