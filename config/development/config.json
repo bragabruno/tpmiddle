@@ -12,8 +12,8 @@
     "debug": false
   },
   "hid": {
-    "pollInterval": 100,
-    "deviceTimeout": 5000
+    "pollInterval": 250,
+    "deviceTimeout": 2000
   },
   "statusBar": {
     "showIcon": true,
