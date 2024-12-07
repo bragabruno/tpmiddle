@@ -15,6 +15,8 @@
     dispatch_queue_t _eventQueue;
     NSLock *_stateLock;
     NSLock *_delegateLock;
+    float _scrollAccumX;
+    float _scrollAccumY;
 }
 
 - (void)notifyDelegateOfButtonPress;
@@ -35,6 +37,8 @@
         _middleButtonDown = NO;
         _pendingDeltaX = 0;
         _pendingDeltaY = 0;
+        _scrollAccumX = 0;
+        _scrollAccumY = 0;
         _lastMovementTime = [NSDate date];
         _savedCursorPosition = CGPointZero;
         _stateLock = [[NSLock alloc] init];
@@ -75,6 +79,8 @@
     _isScrollMode = NO;
     _pendingDeltaX = 0;
     _pendingDeltaY = 0;
+    _scrollAccumX = 0;
+    _scrollAccumY = 0;
     _lastMovementTime = [NSDate date];
     [_stateLock unlock];
 }
@@ -180,6 +186,14 @@
                                 CGEventRef event = CGEventCreate(NULL);
                                 if (event) {
                                     self->_savedCursorPosition = CGEventGetLocation(event);
+                                    // Create a dummy move event to ensure proper cursor state
+                                    CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+                                                                               self->_savedCursorPosition,
+                                                                               kCGMouseButtonLeft);
+                                    if (moveEvent) {
+                                        CGEventPost(kCGHIDEventTap, moveEvent);
+                                        CFRelease(moveEvent);
+                                    }
                                     CFRelease(event);
                                 }
                             });
@@ -223,7 +237,7 @@
         }
         
         NSTimeInterval timeSinceLastMovement = [[NSDate date] timeIntervalSinceDate:_lastMovementTime];
-        if (timeSinceLastMovement >= 0.001) {
+        if (timeSinceLastMovement >= 0.008) { // Increased interval for smoother movement
             uint8_t buttons = (_leftButtonDown ? kLeftButtonBit : 0) | 
                              (_rightButtonDown ? kRightButtonBit : 0) | 
                              (_middleButtonDown ? kMiddleButtonBit : 0);
@@ -241,13 +255,27 @@
             
             if (scrollMode && !middleDown) {
                 if (deltaX != 0 || deltaY != 0) {
-                    [self handleScrollInput:deltaY withHorizontal:deltaX];
+                    // Accumulate scroll values for smoother scrolling
+                    _scrollAccumX += deltaX * 0.5;
+                    _scrollAccumY += deltaY * 0.5;
+                    
+                    int scrollX = (int)_scrollAccumX;
+                    int scrollY = (int)_scrollAccumY;
+                    
+                    if (scrollX != 0 || scrollY != 0) {
+                        [self handleScrollInput:scrollY withHorizontal:scrollX];
+                        _scrollAccumX -= scrollX;
+                        _scrollAccumY -= scrollY;
+                    }
                     
                     dispatch_async(dispatch_get_main_queue(), ^{
+                        // Create a move event to maintain cursor state
                         CGEventRef moveEvent = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
                                                                    cursorPos,
                                                                    kCGMouseButtonLeft);
                         if (moveEvent) {
+                            CGEventSetIntegerValueField(moveEvent, kCGMouseEventWindowUnderMousePointer, 0);
+                            CGEventSetIntegerValueField(moveEvent, kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent, 0);
                             CGEventPost(kCGHIDEventTap, moveEvent);
                             CFRelease(moveEvent);
                         }
