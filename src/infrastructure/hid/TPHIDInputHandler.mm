@@ -160,10 +160,9 @@
     @try {
         BOOL stateChanged = NO;
         
-        // Handle each button type separately to prevent cross-triggering
         switch (usage) {
             case 1: // Left button
-                if (!_middleButtonDown && _leftButtonDown != (BOOL)buttonState) {  // Only process left button if middle isn't down
+                if (_leftButtonDown != (BOOL)buttonState) {
                     _leftButtonDown = buttonState;
                     stateChanged = YES;
                 }
@@ -174,7 +173,7 @@
                     stateChanged = YES;
                 }
                 break;
-            case 3: // Middle button - handle exclusively for scroll mode
+            case 3: // Middle button - handle exclusively for scroll mode toggle
                 if (buttonState && !_middleButtonDown) {
                     _middleButtonPressTime = [NSDate date];
                     _middleButtonDown = YES;
@@ -238,9 +237,9 @@
         
         NSTimeInterval timeSinceLastMovement = [[NSDate date] timeIntervalSinceDate:_lastMovementTime];
         if (timeSinceLastMovement >= 0.004) { // Decreased interval for more responsive movement
+            // Only include left and right button states, exclude middle button
             uint8_t buttons = (_leftButtonDown ? kLeftButtonBit : 0) | 
-                             (_rightButtonDown ? kRightButtonBit : 0) | 
-                             (_middleButtonDown ? kMiddleButtonBit : 0);
+                             (_rightButtonDown ? kRightButtonBit : 0);
             
             int deltaX = _pendingDeltaX;
             int deltaY = _pendingDeltaY;

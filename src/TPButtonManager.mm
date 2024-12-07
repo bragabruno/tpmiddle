@@ -176,6 +176,15 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 _rightDown = NO;
                 break;
                 
+            case kCGEventOtherMouseDown:
+            case kCGEventOtherMouseUp:
+                // Consume middle button events to prevent clicks
+                if (CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber) == kCGMouseButtonCenter) {
+                    [_stateLock unlock];
+                    return NULL;
+                }
+                break;
+                
             default:
                 break;
         }
@@ -196,7 +205,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         // Log button state
         [[TPLogger sharedLogger] logButtonEvent:leftDown right:rightDown middle:middleDown];
         
-        // Real middle button press takes precedence
+        // Handle middle button state for scroll mode only
         if (middleDown != _middlePressed) {
             _middlePressed = middleDown;
             if (!_middlePressed) {
@@ -204,13 +213,12 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
                 _accumulatedDeltaX = 0;
                 _accumulatedDeltaY = 0;
             }
+            // Notify delegate of state change without generating click events
+            [self notifyDelegateOfMiddleButtonState:middleDown];
         }
         
         if (middleDown) {
-            if (!_middleEmulated) {
-                [self postMiddleButtonEvent:YES];
-                _middleEmulated = YES;
-            }
+            _middleEmulated = YES;
             [_stateLock unlock];
             return;
         }
@@ -235,17 +243,17 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         if (leftDown && rightDown && !_middleEmulated) {
             NSTimeInterval timeDiff = fabs([_leftDownTime timeIntervalSinceDate:_rightDownTime]);
             if (timeDiff <= [TPConfig sharedConfig].middleButtonDelay) {
-                [self postMiddleButtonEvent:YES];
                 _middleEmulated = YES;
                 _middlePressed = YES;
+                [self notifyDelegateOfMiddleButtonState:YES];
             }
         }
         
         // Release emulated middle button when both buttons are released
         if (!leftDown && !rightDown && _middleEmulated) {
-            [self postMiddleButtonEvent:NO];
             _middleEmulated = NO;
             _middlePressed = NO;
+            [self notifyDelegateOfMiddleButtonState:NO];
             
             // Reset scroll state
             _accumulatedDeltaX = 0;
@@ -316,10 +324,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     [_stateLock lock];
     _leftDown = NO;
     _rightDown = NO;
-    if (_middleEmulated) {
-        [self postMiddleButtonEvent:NO];
-        _middleEmulated = NO;
-    }
+    _middleEmulated = NO;
     _middlePressed = NO;
     _leftDownTime = nil;
     _rightDownTime = nil;
@@ -329,6 +334,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     _accumulatedDeltaY = 0;
     _lastScrollTime = [NSDate timeIntervalSinceReferenceDate];
     [_stateLock unlock];
+    
+    // Notify delegate of reset
+    [self notifyDelegateOfMiddleButtonState:NO];
 }
 
 - (BOOL)isMiddleButtonEmulated {
@@ -358,53 +366,6 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         dispatch_async(_delegateQueue, ^{
             [delegate middleButtonStateChanged:isDown];
         });
-    }
-}
-
-- (void)postMiddleButtonEvent:(BOOL)isDown {
-    @try {
-        CGEventRef event = CGEventCreate(NULL);
-        if (!event) {
-            NSLog(@"Failed to create CGEvent for getting cursor position");
-            return;
-        }
-        
-        CGPoint pos = CGEventGetLocation(event);
-        CFRelease(event);
-        
-        dispatch_async(_eventQueue, ^{
-            @try {
-                // Create and post middle button event
-                CGEventRef mouseEvent = CGEventCreateMouseEvent(
-                    NULL,
-                    isDown ? kCGEventOtherMouseDown : kCGEventOtherMouseUp,
-                    pos,
-                    kCGMouseButtonCenter
-                );
-                
-                if (mouseEvent) {
-                    CGEventPost(kCGHIDEventTap, mouseEvent);
-                    CFRelease(mouseEvent);
-                    
-                    // Log middle button emulation
-                    [[TPLogger sharedLogger] logMiddleButtonEmulation:isDown];
-                    
-                    // Notify delegate
-                    [self notifyDelegateOfMiddleButtonState:isDown];
-                    
-                    if ([TPConfig sharedConfig].debugMode) {
-                        DebugLog(@"Posted middle button %@ event at {%f, %f}",
-                                isDown ? @"down" : @"up", pos.x, pos.y);
-                    }
-                } else {
-                    NSLog(@"Failed to create mouse event");
-                }
-            } @catch (NSException *exception) {
-                NSLog(@"Exception in postMiddleButtonEvent async block: %@", exception);
-            }
-        });
-    } @catch (NSException *exception) {
-        NSLog(@"Exception in postMiddleButtonEvent: %@", exception);
     }
 }
 
