@@ -11,7 +11,7 @@
     NSPoint _deltaPoint;
     uint8_t _buttonState;
     NSLock *_stateLock;
-    dispatch_queue_t _updateQueue;
+    BOOL _isMonitoring;
 }
 
 @property (nonatomic, strong) NSView *contentView;
@@ -30,21 +30,13 @@
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (self) {
         _stateLock = [[NSLock alloc] init];
-        _updateQueue = dispatch_queue_create("com.tpmiddle.viewController.update", DISPATCH_QUEUE_SERIAL);
-        
-        // Initialize HID manager
         _hidManager = [TPHIDManager sharedManager];
-        if (_hidManager) {
-            _hidManager.delegate = self;
-        }
-        
-        // Initialize state
-        CGRect bounds = CGRectMake(0, 0, 100, 100); // Default size
-        CGPoint center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
-        _lastPoint = NSMakePoint(center.x, center.y);
-        _currentPoint = _lastPoint;
+        _hidManager.delegate = self;
+        _lastPoint = NSZeroPoint;
+        _currentPoint = NSZeroPoint;
         _deltaPoint = NSZeroPoint;
         _buttonState = 0;
+        _isMonitoring = NO;
         
         [[TPLogger sharedLogger] logMessage:@"TPEventViewController initialized"];
     }
@@ -56,31 +48,20 @@
     _hidManager.delegate = nil;
     _hidManager = nil;
     _stateLock = nil;
-    _updateQueue = NULL;
 }
 
 - (void)loadView {
     [[TPLogger sharedLogger] logMessage:@"TPEventViewController loadView called"];
     [super loadView];
     
+    // Enable layer-backed view for movement visualization
+    self.movementView.wantsLayer = YES;
+    self.movementView.layer.backgroundColor = NSColor.clearColor.CGColor;
+    
     if (!self.movementView || !self.deltaLabel || !self.scrollLabel) {
         [[TPLogger sharedLogger] logMessage:@"Failed to load view outlets"];
         return;
     }
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // Enable layer-backed view for movement visualization
-        self.movementView.wantsLayer = YES;
-        self.movementView.layer.backgroundColor = NSColor.clearColor.CGColor;
-        
-        // Initialize center point
-        CGRect bounds = self.movementView.bounds;
-        CGPoint center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
-        [self->_stateLock lock];
-        self->_lastPoint = NSMakePoint(center.x, center.y);
-        self->_currentPoint = self->_lastPoint;
-        [self->_stateLock unlock];
-    });
     
     [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"View outlets - movementView: %@, deltaLabel: %@, scrollLabel: %@",
                                        self.movementView,
@@ -94,9 +75,18 @@
 }
 
 - (void)startMonitoring {
+    [_stateLock lock];
+    if (_isMonitoring) {
+        [_stateLock unlock];
+        return;
+    }
+    _isMonitoring = YES;
+    [_stateLock unlock];
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self->_updateTimer) {
-            [self stopMonitoring];
+            [self->_updateTimer invalidate];
+            self->_updateTimer = nil;
         }
         
         self->_updateTimer = [NSTimer scheduledTimerWithTimeInterval:0.016  // ~60 FPS
@@ -110,6 +100,14 @@
 }
 
 - (void)stopMonitoring {
+    [_stateLock lock];
+    if (!_isMonitoring) {
+        [_stateLock unlock];
+        return;
+    }
+    _isMonitoring = NO;
+    [_stateLock unlock];
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         if (self->_updateTimer) {
             [self->_updateTimer invalidate];
@@ -133,22 +131,22 @@
     // Update movement visualization
     if (!NSEqualPoints(lastPoint, currentPoint)) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSRect bounds = self.movementView.bounds;
-            NSPoint center = NSMakePoint(NSMidX(bounds), NSMidY(bounds));
-            
-            // Scale the movement for visualization
-            CGFloat scale = 2.0;
-            NSPoint scaledDelta = NSMakePoint(deltaPoint.x * scale, deltaPoint.y * scale);
-            
-            // Calculate new point
-            NSPoint newPoint = NSMakePoint(center.x + scaledDelta.x, center.y + scaledDelta.y);
-            
-            // Keep point within bounds
-            newPoint.x = MAX(0, MIN(newPoint.x, bounds.size.width));
-            newPoint.y = MAX(0, MIN(newPoint.y, bounds.size.height));
-            
-            // Draw movement
             @try {
+                NSRect bounds = self.movementView.bounds;
+                NSPoint center = NSMakePoint(NSMidX(bounds), NSMidY(bounds));
+                
+                // Scale the movement for visualization
+                CGFloat scale = 2.0;
+                NSPoint scaledDelta = NSMakePoint(deltaPoint.x * scale, deltaPoint.y * scale);
+                
+                // Calculate new point
+                NSPoint newPoint = NSMakePoint(center.x + scaledDelta.x, center.y + scaledDelta.y);
+                
+                // Keep point within bounds
+                newPoint.x = MAX(0, MIN(newPoint.x, bounds.size.width));
+                newPoint.y = MAX(0, MIN(newPoint.y, bounds.size.height));
+                
+                // Draw movement
                 NSBezierPath *path = [NSBezierPath bezierPath];
                 [path moveToPoint:lastPoint];
                 [path lineToPoint:newPoint];

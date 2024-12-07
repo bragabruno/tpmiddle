@@ -33,6 +33,8 @@
 @implementation TPApplication
 
 @synthesize shouldKeepRunning = _shouldKeepRunning;
+@synthesize waitingForPermissions = _waitingForPermissions;
+@synthesize showingPermissionAlert = _showingPermissionAlert;
 
 + (instancetype)sharedApplication {
     static TPApplication *sharedApplication = nil;
@@ -47,6 +49,8 @@
     if (self = [super init]) {
         _isInitialized = NO;
         _shouldKeepRunning = YES;
+        _waitingForPermissions = NO;
+        _showingPermissionAlert = NO;
         _stateLock = [[NSLock alloc] init];
         _setupQueue = dispatch_queue_create("com.tpmiddle.application.setup", DISPATCH_QUEUE_SERIAL);
         
@@ -98,6 +102,7 @@
                 
                 // Load the view to ensure outlets are connected
                 [viewController loadView];
+                [viewController startMonitoring];
                 self.eventViewController = viewController;
                 [[TPLogger sharedLogger] logMessage:@"TPEventViewController loaded from nib"];
             }
@@ -158,16 +163,21 @@
         
         [_stateLock lock];
         if (self.hidManager) {
+            self.hidManager.delegate = nil;
             [self.hidManager stop];
             self.hidManager = nil;
         }
         
         if (self.buttonManager) {
+            self.buttonManager.delegate = nil;
             [self.buttonManager reset];
             self.buttonManager = nil;
         }
         
-        self.statusBarController = nil;
+        if (self.statusBarController) {
+            self.statusBarController.delegate = nil;
+            self.statusBarController = nil;
+        }
         [_stateLock unlock];
         
         [[TPLogger sharedLogger] stopLogging];
@@ -337,6 +347,39 @@
             [NSApp terminate:nil];
         }
     }
+}
+
+#pragma mark - TPHIDManagerDelegate
+
+- (void)didDetectDeviceAttached:(NSString *)deviceInfo {
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Device attached: %@", deviceInfo]];
+}
+
+- (void)didDetectDeviceDetached:(NSString *)deviceInfo {
+    [[TPLogger sharedLogger] logMessage:[NSString stringWithFormat:@"Device detached: %@", deviceInfo]];
+}
+
+- (void)didEncounterError:(NSError *)error {
+    [self.errorHandler showError:error];
+    [self.errorHandler logError:error];
+}
+
+- (void)didReceiveButtonPress:(BOOL)leftButton right:(BOOL)rightButton middle:(BOOL)middleButton {
+    [self.buttonManager updateButtonStates:leftButton right:rightButton middle:middleButton];
+}
+
+- (void)didReceiveMovement:(int)deltaX deltaY:(int)deltaY withButtonState:(uint8_t)buttons {
+    [self.buttonManager handleMovement:deltaX deltaY:deltaY withButtonState:buttons];
+}
+
+#pragma mark - TPButtonManagerDelegate
+
+- (void)middleButtonStateChanged:(BOOL)pressed {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.eventViewController) {
+            [self.eventViewController startMonitoring];
+        }
+    });
 }
 
 #pragma mark - TPStatusBarControllerDelegate
