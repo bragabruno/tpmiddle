@@ -309,7 +309,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     
     // Apply acceleration based on movement speed
     CGFloat speed = sqrt(deltaX * deltaX + deltaY * deltaY);
-    CGFloat accelerationFactor = 1.0 + (speed * config.scrollAcceleration * timeDelta);
+    CGFloat accelerationFactor = 0.0 + (speed * config.scrollAcceleration * timeDelta);
     
     // Use raw movement values
     CGFloat adjustedDeltaX = deltaX;
