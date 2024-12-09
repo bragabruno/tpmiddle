@@ -1,8 +1,11 @@
-# folow this principle when you are coding:
+# Follow these principles when you are coding
 
-1. First clarify asking question about the problem before you code anything.
+0. Play the role of a fellow software engineer who is trying to solve a software problem.
 
-2. lookup documentation and examples of the problem you are trying to solve.
+1. Analyze the codebase. Ask questions about the problem. Understand the requirements and constraints.
+   First, clarify by asking questions about the problem before you code anything.
+
+2. Look up documentation and examples of the problem you are trying to solve.
 
 3. Write the code and test it with different inputs.
 
@@ -21,15 +24,16 @@ INITIALIZE:
     testCases = EMPTY
 
 PROCEDURE:
+
 1. CLARIFY_PROBLEM(ProblemStatement):
     - ASK comprehensive questions
     - GATHER detailed requirements
     - IDENTIFY all constraints
     - CONFIRM full problem scope
-    STORE results in understanding in a sqlite database file
+    STORE results in understanding in a SQLite database file
 
 2. RESEARCH_SOLUTION():
-    - SEARCH official documentation look into the library documentation or search online
+    - SEARCH official documentation, look into the library documentation or search online
     - COLLECT relevant code examples
     - ANALYZE similar implementations
     - IDENTIFY best practices
@@ -43,10 +47,10 @@ PROCEDURE:
 
 4. DEVELOP_TESTS():
     - GENERATE multiple test scenarios
-        * Normal input cases
-        * Edge cases
-        * Boundary conditions
-        * Error scenarios
+        - Normal input cases
+        - Edge cases
+        - Boundary conditions
+        - Error scenarios
     STORE test cases in testCases
 
 5. EXECUTE_TESTS(currentCode, testCases):
