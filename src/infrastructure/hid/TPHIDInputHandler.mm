@@ -13,9 +13,12 @@
     dispatch_queue_t _inputQueue;
     NSLock *_stateLock;
     CFMachPortRef _eventTap;
+    dispatch_source_t _eventTapSource;
 }
 
 - (void)enforceCursorPosition;
+- (void)setupEventTap;
+- (void)teardownEventTap;
 
 @end
 
@@ -31,30 +34,47 @@
 }
 
 static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType type, CGEventRef event, void *refcon) {
-    TPHIDInputHandler *handler = (__bridge TPHIDInputHandler *)refcon;
-    
-    // Only intercept events when middle button is held down
-    if (handler->_middleButtonDown) {
-        // Block all mouse movement events while middle button is held
-        if (type == kCGEventMouseMoved || 
-            type == kCGEventLeftMouseDragged || 
-            type == kCGEventRightMouseDragged || 
-            type == kCGEventOtherMouseDragged) {
-            [handler enforceCursorPosition];
-            return NULL;
-        }
+    @autoreleasepool {
+        TPHIDInputHandler *handler = (__bridge TPHIDInputHandler *)refcon;
         
-        // For any other event while middle button is held, force cursor position
-        CGEventSetLocation(event, handler->_savedCursorPosition);
-        [handler enforceCursorPosition];
+        [handler->_stateLock lock];
+        BOOL isMiddleButtonDown = handler->_middleButtonDown;
+        CGPoint savedPosition = handler->_savedCursorPosition;
+        [handler->_stateLock unlock];
+        
+        // Only intercept events when middle button is held down
+        if (isMiddleButtonDown) {
+            // Block all mouse movement events while middle button is held
+            if (type == kCGEventMouseMoved || 
+                type == kCGEventLeftMouseDragged || 
+                type == kCGEventRightMouseDragged || 
+                type == kCGEventOtherMouseDragged) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [handler enforceCursorPosition];
+                });
+                return NULL;
+            }
+            
+            // For any other event while middle button is held, force cursor position
+            if (!CGPointEqualToPoint(savedPosition, CGPointZero)) {
+                CGEventSetLocation(event, savedPosition);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [handler enforceCursorPosition];
+                });
+            }
+        }
+        return event;
     }
-    return event;
 }
 
 - (void)enforceCursorPosition {
-    if (_middleButtonDown && !CGPointEqualToPoint(_savedCursorPosition, CGPointZero)) {
-        // Force cursor back to saved position
-        CGWarpMouseCursorPosition(_savedCursorPosition);
+    [_stateLock lock];
+    BOOL isMiddleDown = _middleButtonDown;
+    CGPoint savedPos = _savedCursorPosition;
+    [_stateLock unlock];
+    
+    if (isMiddleDown && !CGPointEqualToPoint(savedPos, CGPointZero)) {
+        CGWarpMouseCursorPosition(savedPos);
     }
 }
 
@@ -67,39 +87,86 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         _stateLock = [[NSLock alloc] init];
         _inputQueue = dispatch_queue_create("com.tpmiddle.inputhandler", DISPATCH_QUEUE_SERIAL);
         
-        // Create event tap to block cursor movement
-        _eventTap = CGEventTapCreate(kCGSessionEventTap,
-                                   kCGHeadInsertEventTap,
-                                   kCGEventTapOptionDefault,
-                                   CGEventMaskBit(kCGEventMouseMoved) |
-                                   CGEventMaskBit(kCGEventLeftMouseDragged) |
-                                   CGEventMaskBit(kCGEventRightMouseDragged) |
-                                   CGEventMaskBit(kCGEventOtherMouseDragged) |
-                                   CGEventMaskBit(kCGEventLeftMouseDown) |
-                                   CGEventMaskBit(kCGEventLeftMouseUp) |
-                                   CGEventMaskBit(kCGEventRightMouseDown) |
-                                   CGEventMaskBit(kCGEventRightMouseUp) |
-                                   CGEventMaskBit(kCGEventOtherMouseDown) |
-                                   CGEventMaskBit(kCGEventOtherMouseUp),
-                                   eventTapCallback,
-                                   (__bridge void *)self);
-        
-        if (_eventTap) {
-            CFRunLoopSourceRef runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, _eventTap, 0);
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, kCFRunLoopCommonModes);
-            CGEventTapEnable(_eventTap, true);
-            CFRelease(runLoopSource);
-        }
+        [self setupEventTap];
     }
     return self;
 }
 
-- (void)dealloc {
-    [self reset];
+- (void)setupEventTap {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self->_eventTap) {
+            [self teardownEventTap];
+        }
+        
+        self->_eventTap = CGEventTapCreate(kCGSessionEventTap,
+                                         kCGHeadInsertEventTap,
+                                         kCGEventTapOptionDefault,
+                                         CGEventMaskBit(kCGEventMouseMoved) |
+                                         CGEventMaskBit(kCGEventLeftMouseDragged) |
+                                         CGEventMaskBit(kCGEventRightMouseDragged) |
+                                         CGEventMaskBit(kCGEventOtherMouseDragged) |
+                                         CGEventMaskBit(kCGEventLeftMouseDown) |
+                                         CGEventMaskBit(kCGEventLeftMouseUp) |
+                                         CGEventMaskBit(kCGEventRightMouseDown) |
+                                         CGEventMaskBit(kCGEventRightMouseUp) |
+                                         CGEventMaskBit(kCGEventOtherMouseDown) |
+                                         CGEventMaskBit(kCGEventOtherMouseUp),
+                                         eventTapCallback,
+                                         (__bridge void *)self);
+        
+        if (self->_eventTap) {
+            // Create a run loop source and add it to the main run loop
+            CFRunLoopSourceRef runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, self->_eventTap, 0);
+            if (runLoopSource) {
+                CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, kCFRunLoopCommonModes);
+                CGEventTapEnable(self->_eventTap, true);
+                CFRelease(runLoopSource);
+                
+                // Create a dispatch source to monitor the event tap
+                self->_eventTapSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, 
+                                                             CFMachPortGetPort(self->_eventTap), 
+                                                             0, 
+                                                             dispatch_get_main_queue());
+                
+                if (self->_eventTapSource) {
+                    dispatch_source_set_event_handler(self->_eventTapSource, ^{
+                        // If the event tap becomes disabled, try to re-enable it
+                        if (!CGEventTapIsEnabled(self->_eventTap)) {
+                            CGEventTapEnable(self->_eventTap, true);
+                            [[TPLogger sharedLogger] logMessage:@"Re-enabled event tap"];
+                        }
+                    });
+                    dispatch_resume(self->_eventTapSource);
+                }
+            } else {
+                [[TPLogger sharedLogger] logMessage:@"Failed to create run loop source for event tap"];
+                if (self->_eventTap) {
+                    CFRelease(self->_eventTap);
+                    self->_eventTap = NULL;
+                }
+            }
+        } else {
+            [[TPLogger sharedLogger] logMessage:@"Failed to create event tap"];
+        }
+    });
+}
+
+- (void)teardownEventTap {
+    if (_eventTapSource) {
+        dispatch_source_cancel(_eventTapSource);
+        _eventTapSource = NULL;
+    }
+    
     if (_eventTap) {
         CGEventTapEnable(_eventTap, false);
         CFRelease(_eventTap);
+        _eventTap = NULL;
     }
+}
+
+- (void)dealloc {
+    [self reset];
+    [self teardownEventTap];
     _stateLock = nil;
     _inputQueue = NULL;
 }
@@ -203,7 +270,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     
     [_stateLock unlock];
     
-    id<TPHIDManagerDelegate> delegate = _delegate;
+    __weak id<TPHIDManagerDelegate> delegate = _delegate;
     if ([delegate respondsToSelector:@selector(didReceiveButtonPress:right:middle:)]) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [delegate didReceiveButtonPress:leftButton right:rightButton middle:middleButton];
@@ -220,7 +287,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     
     if (isMiddleButtonHeld) {
         // Force cursor position
-        [self enforceCursorPosition];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self enforceCursorPosition];
+        });
         
         // Convert movement to scroll
         IOHIDElementRef element = IOHIDValueGetElement(value);
@@ -261,16 +330,18 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         }
         
         if (deltaX != 0 || deltaY != 0) {
-            // Create and post scroll event
-            CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, deltaY, deltaX);
-            if (scrollEvent) {
-                CGEventPost(kCGHIDEventTap, scrollEvent);
-                CFRelease(scrollEvent);
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                // Create and post scroll event
+                CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 2, deltaY, deltaX);
+                if (scrollEvent) {
+                    CGEventPost(kCGHIDEventTap, scrollEvent);
+                    CFRelease(scrollEvent);
+                }
+                
+                // Force cursor position again after scroll
+                [self enforceCursorPosition];
+            });
         }
-        
-        // Force cursor position again after scroll
-        [self enforceCursorPosition];
         return;
     }
     
@@ -297,7 +368,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
         [_stateLock unlock];
         
         uint8_t buttons = (leftDown ? 1 : 0) | (rightDown ? 2 : 0);
-        id<TPHIDManagerDelegate> delegate = _delegate;
+        __weak id<TPHIDManagerDelegate> delegate = _delegate;
         if ([delegate respondsToSelector:@selector(didReceiveMovement:deltaY:withButtonState:)]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [delegate didReceiveMovement:deltaX deltaY:deltaY withButtonState:buttons];
@@ -320,19 +391,21 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy __unused, CGEventType t
     BOOL isMiddleButtonHeld = _middleButtonDown;
     [_stateLock unlock];
     
-    if (isMiddleButtonHeld) {
-        [self enforceCursorPosition];
-    }
-    
-    CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 1, scrollDelta);
-    if (scrollEvent) {
-        CGEventPost(kCGHIDEventTap, scrollEvent);
-        CFRelease(scrollEvent);
-    }
-    
-    if (isMiddleButtonHeld) {
-        [self enforceCursorPosition];
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (isMiddleButtonHeld) {
+            [self enforceCursorPosition];
+        }
+        
+        CGEventRef scrollEvent = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 1, scrollDelta);
+        if (scrollEvent) {
+            CGEventPost(kCGHIDEventTap, scrollEvent);
+            CFRelease(scrollEvent);
+        }
+        
+        if (isMiddleButtonHeld) {
+            [self enforceCursorPosition];
+        }
+    });
 }
 
 @end
