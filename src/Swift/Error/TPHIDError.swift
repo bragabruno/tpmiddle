@@ -1,5 +1,6 @@
 import Foundation
 
+/// Errors that can occur during HID operations
 enum TPHIDError: LocalizedError {
     case hidError(String)
     

@@ -1,7 +1,8 @@
 import Foundation
 import IOKit.hid
-import os.log
+import os
 
+/// Handles input processing from HID devices
 final class TPHIDInputHandler {
     // MARK: - Properties
     

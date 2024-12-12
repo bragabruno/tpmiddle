@@ -1,7 +1,9 @@
 import Foundation
 
+// MARK: - Protocols
+
 /// Protocol defining the interface for HID manager event handling
-public protocol TPHIDManagerDelegate: AnyObject {
+protocol TPHIDManagerDelegate: AnyObject {
     /// Called when a new HID device is attached
     func didDetectDeviceAttached(_ deviceInfo: String)
     
@@ -16,4 +18,18 @@ public protocol TPHIDManagerDelegate: AnyObject {
     
     /// Called when movement is detected
     func didReceiveMovement(deltaX: Int, deltaY: Int, buttonState: UInt8)
+}
+
+// MARK: - Error Types
+
+/// Errors that can occur during HID operations
+enum TPHIDError: LocalizedError {
+    case hidError(String)
+    
+    var errorDescription: String? {
+        switch self {
+        case .hidError(let message):
+            return "HID error: \(message)"
+        }
+    }
 }
