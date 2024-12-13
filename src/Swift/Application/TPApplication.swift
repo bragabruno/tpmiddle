@@ -1,118 +1,143 @@
 import Cocoa
-import IOKit.hid
 import Combine
 
-@MainActor
-final class TPApplication: NSObject {
-    // MARK: - Singleton
-    
-    static let shared = TPApplication()
-    
+/// Main application class that coordinates all components
+@objcMembers
+public final class TPApplication: NSObject {
     // MARK: - Properties
     
-    @Published private(set) var isInitialized = false
-    @Published private(set) var waitingForPermissions = false
-    @Published private(set) var showingPermissionAlert = false
-    @Published private(set) var shouldKeepRunning = true
+    /// Shared instance
+    public static let shared = TPApplication()
+    
+    /// Current application state
+    public private(set) var state: TPApplicationState = .notInitialized {
+        didSet {
+            delegate?.applicationDidChangeState?(state)
+            if TPConfig.shared.debugMode {
+                TPLogger.shared.log("Application state changed to: \(state.description)")
+            }
+        }
+    }
+    
+    /// Whether the application should continue running
+    public var shouldKeepRunning = true
+    
+    /// Whether we're waiting for permissions
+    public private(set) var waitingForPermissions = false
+    
+    /// Whether we're showing a permission alert
+    public private(set) var showingPermissionAlert = false
+    
+    /// Application delegate
+    public weak var delegate: TPApplicationDelegate?
+    
+    // MARK: - Private Properties
     
     private let stateLock = NSLock()
-    private let setupQueue = DispatchQueue(label: "com.tpmiddle.application.setup", qos: .userInitiated)
+    private let setupQueue = DispatchQueue(label: "com.tpmiddle.application.setup", qos: .userInteractive)
     
     private var hidManager: TPHIDManager?
     private var buttonManager: TPButtonManager?
     private var statusBarController: TPStatusBarController?
-    
     private var eventWindow: NSWindow?
     private var eventViewController: TPEventViewController?
     
-    private let permissionManager: TPPermissionManager
-    private let errorHandler: TPErrorHandler
-    private let statusReporter: TPStatusReporter
+    private let permissionManager = TPPermissionManager.shared
+    private let errorHandler = TPErrorHandler.shared
+    private let statusReporter = TPStatusReporter.shared
     
     private var cancellables = Set<AnyCancellable>()
     
     // MARK: - Initialization
     
     private override init() {
-        self.permissionManager = .shared
-        self.errorHandler = .shared
-        self.statusReporter = .shared
-        
         super.init()
         
         // Start logging immediately
         TPLogger.shared.startLogging()
-        TPLogger.shared.logMessage("TPApplication initializing...")
+        TPLogger.shared.log("TPApplication initializing...")
         
-        // Log system information
+        // Log system info
         statusReporter.logSystemInfo()
+        
+        setupObservers()
     }
     
     deinit {
         cleanup()
+        cancellables.removeAll()
     }
     
     // MARK: - Public Methods
     
-    func start() async {
-        guard isInitialized else {
-            TPLogger.shared.logMessage("TPApplication not properly initialized")
-            NSApp.terminate(nil)
+    /// Start the application
+    public func start() {
+        stateLock.lock()
+        guard state != .running else {
+            stateLock.unlock()
             return
         }
+        state = .starting
+        stateLock.unlock()
         
         do {
-            TPLogger.shared.logMessage("Starting application...")
+            TPLogger.shared.log("Starting application...")
             
             // Check permissions
+            state = .checkingPermissions
             if let error = permissionManager.checkPermissions() {
-                await handlePermissionError(error)
+                handlePermissionError(error)
                 return
             }
             
-            try await setupManagers()
+            // Initialize components
+            try initializeComponents()
+            
+            // Configure HID device matching
             configureHIDDeviceMatching()
             
             // Start HID monitoring
-            guard await startHIDManager() else {
-                if !waitingForPermissions && !showingPermissionAlert {
-                    TPLogger.shared.logMessage("Failed to start HID manager")
-                    NSApp.terminate(nil)
-                }
-                return
-            }
+            guard startHIDMonitoring() else { return }
             
             // Initialize event viewer if in debug mode
             if TPConfig.shared.debugMode {
-                await setupAndShowEventViewer()
+                setupQueue.async { [weak self] in
+                    self?.setupEventViewer()
+                    DispatchQueue.main.async {
+                        self?.showEventViewer()
+                    }
+                }
             }
             
-            TPLogger.shared.logMessage("TPMiddle application started successfully")
-            TPLogger.shared.logMessage(applicationStatus)
+            state = .running
+            TPLogger.shared.log("TPMiddle application started successfully")
+            TPLogger.shared.log(applicationStatus)
             
         } catch {
-            errorHandler.logError(error)
+            errorHandler.handle(error)
             if !waitingForPermissions && !showingPermissionAlert {
                 NSApp.terminate(nil)
             }
         }
     }
     
-    func cleanup() {
+    /// Clean up application resources
+    public func cleanup() {
         guard !waitingForPermissions && !showingPermissionAlert else { return }
         
-        TPLogger.shared.logMessage("TPApplication cleaning up...")
+        TPLogger.shared.log("TPApplication cleaning up...")
+        state = .stopping
         
-        Task { @MainActor in
-            hideEventViewer()
-            eventWindow = nil
-            eventViewController?.stopMonitoring()
-            eventViewController = nil
+        // Clean up UI
+        DispatchQueue.main.async { [weak self] in
+            self?.hideEventViewer()
+            self?.eventWindow = nil
+            self?.eventViewController?.stopMonitoring()
+            self?.eventViewController = nil
         }
         
+        // Clean up managers
         stateLock.lock()
-        defer { stateLock.unlock() }
-        
         hidManager?.delegate = nil
         hidManager?.stop()
         hidManager = nil
@@ -123,174 +148,214 @@ final class TPApplication: NSObject {
         
         statusBarController?.delegate = nil
         statusBarController = nil
+        stateLock.unlock()
         
         TPLogger.shared.stopLogging()
+        state = .stopped
     }
     
-    var applicationStatus: String {
+    /// Get current application status
+    public var applicationStatus: String {
         stateLock.lock()
         defer { stateLock.unlock() }
         
         return """
-            TPMiddle Status:
-            Initialized: \(isInitialized ? "Yes" : "No")
-            Debug Mode: \(TPConfig.shared.debugMode ? "Enabled" : "Disabled")
-            HID Manager: \(hidManager != nil ? "Running" : "Stopped")
-            """
+        TPMiddle Status:
+        State: \(state.description)
+        Debug Mode: \(TPConfig.shared.debugMode ? "Enabled" : "Disabled")
+        HID Manager: \(hidManager != nil ? "Running" : "Stopped")
+        """
     }
     
     // MARK: - Private Methods
     
-    private func setupManagers() async throws {
-        stateLock.lock()
-        defer { stateLock.unlock() }
+    private func setupObservers() {
+        // Observe configuration changes
+        if #available(macOS 10.15, *) {
+            TPConfig.shared.configurationChanged
+                .sink { [weak self] in
+                    self?.handleConfigurationChange()
+                }
+                .store(in: &cancellables)
+        }
         
+        // Observe permission changes
+        NotificationCenter.default.publisher(for: .TPPermissionsChanged)
+            .sink { [weak self] notification in
+                if let granted = notification.object as? Bool {
+                    self?.handlePermissionChange(granted)
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func initializeComponents() throws {
+        // Initialize status bar first
+        statusBarController = TPStatusBarController.shared
+        guard statusBarController != nil else {
+            throw TPApplicationError.componentInitializationFailed("Status Bar Controller")
+        }
+        
+        // Initialize managers
         hidManager = TPHIDManager.shared
         guard hidManager != nil else {
-            throw TPError.managerInitializationFailed("Failed to create HID manager")
+            throw TPApplicationError.componentInitializationFailed("HID Manager")
         }
-        hidManager?.delegate = self
         
         buttonManager = TPButtonManager.shared
         guard buttonManager != nil else {
-            throw TPError.managerInitializationFailed("Failed to create button manager")
+            throw TPApplicationError.componentInitializationFailed("Button Manager")
         }
+        
+        // Set up delegates
+        setupDelegates()
+    }
+    
+    private func setupDelegates() {
+        hidManager?.delegate = self
         buttonManager?.delegate = self
+        statusBarController?.delegate = self
     }
     
     private func configureHIDDeviceMatching() {
-        hidManager?.addDeviceMatching(usagePage: kHIDPage_GenericDesktop, usage: kHIDUsage_GD_Mouse)
-        hidManager?.addDeviceMatching(usagePage: kHIDPage_GenericDesktop, usage: kHIDUsage_GD_Pointer)
+        hidManager?.addDeviceMatching(usagePage: TPHIDUsage.Page.genericDesktop,
+                                    usage: TPHIDUsage.GenericDesktop.mouse)
+        hidManager?.addDeviceMatching(usagePage: TPHIDUsage.Page.genericDesktop,
+                                    usage: TPHIDUsage.GenericDesktop.pointer)
         
-        // Add multiple vendor IDs for broader device support
-        hidManager?.addVendorMatching(vendorID: kVendorIDLenovo)  // Lenovo
-        hidManager?.addVendorMatching(vendorID: 0x04B3)  // IBM
-        hidManager?.addVendorMatching(vendorID: 0x0451)  // Texas Instruments
-        hidManager?.addVendorMatching(vendorID: 0x046D)  // Logitech
+        // Add vendor IDs for broader device support
+        hidManager?.addVendorMatching(TPHIDVendorID.lenovo)  // Lenovo
+        hidManager?.addVendorMatching(TPHIDVendorID.ibm)     // IBM
+        hidManager?.addVendorMatching(TPHIDVendorID.ti)      // Texas Instruments
+        hidManager?.addVendorMatching(TPHIDVendorID.logitech) // Logitech
     }
     
-    private func startHIDManager() async -> Bool {
-        await hidManager?.start() ?? false
+    private func startHIDMonitoring() -> Bool {
+        guard let hidManager = hidManager else { return false }
+        
+        if !hidManager.start() {
+            if !waitingForPermissions && !showingPermissionAlert {
+                TPLogger.shared.log("Failed to start HID manager")
+                NSApp.terminate(nil)
+            }
+            return false
+        }
+        return true
     }
     
-    private func handlePermissionError(_ error: Error) async {
-        await permissionManager.showPermissionError(error) { [weak self] shouldRetry in
+    private func setupEventViewer() {
+        DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            Task {
-                if shouldRetry {
-                    await self.start()
-                } else {
-                    self.shouldKeepRunning = false
-                    NSApp.terminate(nil)
+            do {
+                if self.eventViewController == nil {
+                    // Load view controller from nib
+                    guard let mainBundle = Bundle.main,
+                          let nibPath = mainBundle.path(forResource: "TPEventViewController", ofType: "nib") else {
+                        throw TPApplicationError.resourceNotFound("TPEventViewController.nib")
+                    }
+                    
+                    let viewController = TPEventViewController(nibName: "TPEventViewController", bundle: mainBundle)
+                    viewController.loadView()
+                    viewController.startMonitoring()
+                    self.eventViewController = viewController
+                    TPLogger.shared.log("TPEventViewController loaded from nib")
                 }
+                
+                if self.eventWindow == nil {
+                    let window = NSWindow(
+                        contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                        styleMask: [.titled, .closable, .resizable],
+                        backing: .buffered,
+                        defer: false
+                    )
+                    window.contentViewController = self.eventViewController
+                    window.title = "Event Viewer"
+                    window.center()
+                    self.eventWindow = window
+                }
+            } catch {
+                self.errorHandler.handle(error)
             }
         }
     }
     
-    @MainActor
-    private func setupAndShowEventViewer() {
-        setupQueue.async { [weak self] in
-            guard let self = self else { return }
-            
-            Task { @MainActor in
-                do {
-                    try await self.setupEventViewer()
-                    self.showEventViewer()
-                } catch {
-                    self.errorHandler.logError(error)
-                }
-            }
-        }
-    }
-    
-    @MainActor
-    private func setupEventViewer() async throws {
-        guard eventViewController == nil else { return }
-        
-        // Load view controller from NIB
-        guard let mainBundle = Bundle.main.path(forResource: "TPEventViewController", ofType: "nib") else {
-            TPLogger.shared.logMessage("Failed to find TPEventViewController.nib")
-            throw TPError.resourceNotFound("TPEventViewController.nib not found")
-        }
-        
-        let viewController = TPEventViewController(nibName: "TPEventViewController", bundle: .main)
-        viewController.loadView()
-        viewController.startMonitoring()
-        
-        eventViewController = viewController
-        TPLogger.shared.logMessage("TPEventViewController loaded from nib")
-        
-        if eventWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
-                styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentViewController = viewController
-            window.title = "Event Viewer"
-            window.center()
-            eventWindow = window
-        }
-    }
-    
-    @MainActor
     private func showEventViewer() {
-        eventWindow?.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [weak self] in
+            self?.eventWindow?.makeKeyAndOrderFront(nil)
+        }
     }
     
-    @MainActor
     private func hideEventViewer() {
-        eventWindow?.orderOut(nil)
+        DispatchQueue.main.async { [weak self] in
+            self?.eventWindow?.orderOut(nil)
+        }
+    }
+    
+    private func handlePermissionError(_ error: Error) {
+        state = .waitingForPermissions
+        waitingForPermissions = true
+        
+        permissionManager.showPermissionError(error) { [weak self] shouldRetry in
+            guard let self = self else { return }
+            
+            self.waitingForPermissions = false
+            if shouldRetry {
+                self.start()
+            } else {
+                self.shouldKeepRunning = false
+                NSApp.terminate(nil)
+            }
+        }
+    }
+    
+    private func handleConfigurationChange() {
+        if TPConfig.shared.debugMode {
+            setupQueue.async { [weak self] in
+                self?.setupEventViewer()
+                DispatchQueue.main.async {
+                    self?.showEventViewer()
+                }
+            }
+        } else {
+            hideEventViewer()
+        }
+    }
+    
+    private func handlePermissionChange(_ granted: Bool) {
+        delegate?.applicationDidUpdatePermissions?(granted: granted)
+        if granted {
+            start()
+        }
     }
 }
 
 // MARK: - NSApplicationDelegate
 
 extension TPApplication: NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        TPLogger.shared.logMessage("Application did finish launching")
+    public func applicationDidFinishLaunching(_ notification: Notification) {
+        TPLogger.shared.log("Application did finish launching")
         
         // Process command line arguments
-        TPConfig.shared.applyCommandLineArguments(CommandLine.arguments)
+        let arguments = ProcessInfo.processInfo.arguments
+        TPConfig.shared.applyCommandLineArguments(arguments)
         
-        // Initialize status bar first
-        Task { @MainActor in
-            guard let controller = TPStatusBarController.shared else {
-                TPLogger.shared.logMessage("Failed to create status bar controller")
-                NSApp.terminate(nil)
-                return
-            }
-            
-            statusBarController = controller
-            statusBarController?.delegate = self
-            statusBarController?.setupStatusBar()
-            
-            isInitialized = true
-            TPLogger.shared.logMessage("Application initialization complete")
-            
-            // Check permissions before starting HID manager
-            if let error = permissionManager.checkPermissions() {
-                await handlePermissionError(error)
-                return
-            }
-            
-            await start()
+        // Start the application
+        start()
+    }
+    
+    public func applicationWillTerminate(_ notification: Notification) {
+        if !waitingForPermissions && !showingPermissionAlert {
+            TPLogger.shared.log("Application will terminate")
+            cleanup()
         }
     }
     
-    func applicationWillTerminate(_ notification: Notification) {
-        guard !waitingForPermissions && !showingPermissionAlert else { return }
-        TPLogger.shared.logMessage("Application will terminate")
-        cleanup()
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false // Keep running even when all windows are closed
     }
     
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false  // Keep running even when all windows are closed
-    }
-    
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if !shouldKeepRunning {
             return .terminateNow
         }
@@ -306,34 +371,35 @@ extension TPApplication: NSApplicationDelegate {
 // MARK: - TPHIDManagerDelegate
 
 extension TPApplication: TPHIDManagerDelegate {
-    func didDetectDeviceAttached(_ deviceInfo: String) {
-        TPLogger.shared.logMessage("Device attached: \(deviceInfo)")
+    public func didDetectDeviceAttached(_ deviceInfo: String) {
+        TPLogger.shared.log("Device attached: \(deviceInfo)")
+        delegate?.applicationDidUpdateDeviceConnectivity?(connected: true)
     }
     
-    func didDetectDeviceDetached(_ deviceInfo: String) {
-        TPLogger.shared.logMessage("Device detached: \(deviceInfo)")
+    public func didDetectDeviceDetached(_ deviceInfo: String) {
+        TPLogger.shared.log("Device detached: \(deviceInfo)")
+        delegate?.applicationDidUpdateDeviceConnectivity?(connected: false)
     }
     
-    func didEncounterError(_ error: Error) {
-        errorHandler.showError(error)
-        errorHandler.logError(error)
+    public func didEncounterError(_ error: Error) {
+        errorHandler.handle(error)
     }
     
-    func didReceiveButtonPress(left: Bool, right: Bool, middle: Bool) {
-        buttonManager?.updateButtonStates(left: left, right: right, middle: middle)
+    public func didReceiveButtonPress(left: Bool, right: Bool, middle: Bool) {
+        buttonManager?.updateButtonStates(leftDown: left, right: right, middle: middle)
     }
     
-    func didReceiveMovement(deltaX: Int, deltaY: Int, buttonState: UInt8) {
-        buttonManager?.handleMovement(deltaX: deltaX, deltaY: deltaY, buttonState: buttonState)
+    public func didReceiveMovement(deltaX: Int, deltaY: Int, withButtonState buttons: UInt8) {
+        buttonManager?.handleMovement(deltaX: deltaX, deltaY: deltaY, withButtonState: buttons)
     }
 }
 
 // MARK: - TPButtonManagerDelegate
 
 extension TPApplication: TPButtonManagerDelegate {
-    func middleButtonStateChanged(_ pressed: Bool) {
-        Task { @MainActor in
-            eventViewController?.startMonitoring()
+    public func middleButtonStateChanged(_ isPressed: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.eventViewController?.startMonitoring()
         }
     }
 }
@@ -341,14 +407,12 @@ extension TPApplication: TPButtonManagerDelegate {
 // MARK: - TPStatusBarControllerDelegate
 
 extension TPApplication: TPStatusBarControllerDelegate {
-    func statusBarControllerDidToggleEventViewer(_ show: Bool) {
+    public func statusBarControllerDidToggleEventViewer(_ show: Bool) {
         if show {
             setupQueue.async { [weak self] in
-                guard let self = self else { return }
-                
-                Task { @MainActor in
-                    try? await self.setupEventViewer()
-                    self.showEventViewer()
+                self?.setupEventViewer()
+                DispatchQueue.main.async {
+                    self?.showEventViewer()
                 }
             }
         } else {
@@ -357,23 +421,29 @@ extension TPApplication: TPStatusBarControllerDelegate {
         statusBarController?.updateEventViewerState(show)
     }
     
-    func statusBarControllerWillQuit() {
+    public func statusBarControllerWillQuit() {
         shouldKeepRunning = false
     }
 }
 
-// MARK: - Error Types
+// MARK: - Errors
 
-enum TPError: LocalizedError {
-    case managerInitializationFailed(String)
+enum TPApplicationError: LocalizedError {
+    case componentInitializationFailed(String)
     case resourceNotFound(String)
     
     var errorDescription: String? {
         switch self {
-        case .managerInitializationFailed(let message):
-            return "Manager initialization failed: \(message)"
+        case .componentInitializationFailed(let component):
+            return "Failed to initialize \(component)"
         case .resourceNotFound(let resource):
             return "Resource not found: \(resource)"
         }
     }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let TPPermissionsChanged = Notification.Name("TPPermissionsChanged")
 }

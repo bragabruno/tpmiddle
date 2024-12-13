@@ -1,112 +1,85 @@
 import Foundation
 import IOKit.hid
 
-final class TPHIDDevice {
+/// Represents a HID device with its properties
+@objcMembers
+public final class TPHIDDevice: NSObject {
     // MARK: - Properties
     
-    let device: IOHIDDevice
-    let name: String
-    let vendorID: Int
-    let productID: Int
-    let serialNumber: String?
-    let manufacturer: String?
-    let transport: String?
+    /// The product name of the device
+    public let productName: String
     
-    private(set) var isConnected: Bool
+    /// The vendor ID of the device
+    public let vendorID: NSNumber
+    
+    /// The product ID of the device
+    public let productID: NSNumber
+    
+    /// The underlying IOKit device reference
+    public let deviceRef: IOHIDDevice
     
     // MARK: - Initialization
     
-    init?(device: IOHIDDevice) {
-        self.device = device
+    /// Initialize with an IOKit HID device
+    /// - Parameter device: The IOKit HID device reference
+    public init(device: IOHIDDevice) {
+        self.deviceRef = device
         
-        // Get device properties
-        guard let vendorID = IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? Int,
-              let productID = IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? Int else {
-            return nil
-        }
+        // Get device properties using IOKit
+        self.productName = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "Unknown Device"
+        self.vendorID = IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? NSNumber ?? 0
+        self.productID = IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? NSNumber ?? 0
         
-        self.vendorID = vendorID
-        self.productID = productID
-        
-        // Get optional properties
-        self.name = IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String ?? "Unknown Device"
-        self.serialNumber = IOHIDDeviceGetProperty(device, kIOHIDSerialNumberKey as CFString) as? String
-        self.manufacturer = IOHIDDeviceGetProperty(device, kIOHIDManufacturerKey as CFString) as? String
-        self.transport = IOHIDDeviceGetProperty(device, kIOHIDTransportKey as CFString) as? String
-        
-        self.isConnected = true
+        super.init()
     }
     
     // MARK: - Public Methods
     
-    func open() -> Bool {
-        let result = IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))
-        return result == kIOReturnSuccess
+    /// Check if this device is equal to another IOKit HID device reference
+    /// - Parameter device: The IOKit HID device reference to compare against
+    /// - Returns: True if the devices are the same, false otherwise
+    public func isEqual(to device: IOHIDDevice) -> Bool {
+        return deviceRef == device
     }
     
-    func close() {
-        IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
-        isConnected = false
+    // MARK: - NSObject Overrides
+    
+    public override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? TPHIDDevice else { return false }
+        return deviceRef == other.deviceRef
     }
     
-    func setInputValueCallback(_ callback: @escaping IOHIDValueCallback) {
-        IOHIDDeviceRegisterInputValueCallback(device, callback, Unmanaged.passUnretained(self).toOpaque())
+    public override var hash: Int {
+        return ObjectIdentifier(deviceRef).hashValue
     }
     
-    func setRemovalCallback(_ callback: @escaping IOHIDCallback) {
-        IOHIDDeviceRegisterRemovalCallback(device, callback, Unmanaged.passUnretained(self).toOpaque())
-    }
-}
-
-// MARK: - CustomStringConvertible
-
-extension TPHIDDevice: CustomStringConvertible {
-    var description: String {
-        """
-        HID Device:
-        - Name: \(name)
-        - Vendor ID: 0x\(String(format: "%04X", vendorID))
-        - Product ID: 0x\(String(format: "%04X", productID))
-        - Serial Number: \(serialNumber ?? "N/A")
-        - Manufacturer: \(manufacturer ?? "N/A")
-        - Transport: \(transport ?? "N/A")
-        - Connected: \(isConnected ? "Yes" : "No")
+    public override var description: String {
+        return """
+        TPHIDDevice(
+            productName: \(productName),
+            vendorID: \(String(format: "0x%04X", vendorID.uint32Value)),
+            productID: \(String(format: "0x%04X", productID.uint32Value))
+        )
         """
     }
 }
 
-// MARK: - Equatable
-
-extension TPHIDDevice: Equatable {
-    static func == (lhs: TPHIDDevice, rhs: TPHIDDevice) -> Bool {
-        lhs.device == rhs.device
-    }
-}
-
-// MARK: - Hashable
+// MARK: - Hashable Conformance
 
 extension TPHIDDevice: Hashable {
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(device)
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(deviceRef))
+    }
+    
+    public static func == (lhs: TPHIDDevice, rhs: TPHIDDevice) -> Bool {
+        return lhs.deviceRef == rhs.deviceRef
     }
 }
 
-// MARK: - Device Properties
+// MARK: - Identifiable Conformance
 
-extension TPHIDDevice {
-    var usagePage: Int {
-        IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsagePageKey as CFString) as? Int ?? 0
-    }
-    
-    var usage: Int {
-        IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsageKey as CFString) as? Int ?? 0
-    }
-    
-    var locationID: Int {
-        IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? Int ?? 0
-    }
-    
-    var uniqueID: String {
-        "\(vendorID)-\(productID)-\(locationID)"
+extension TPHIDDevice: Identifiable {
+    public var id: ObjectIdentifier {
+        return ObjectIdentifier(deviceRef)
     }
 }

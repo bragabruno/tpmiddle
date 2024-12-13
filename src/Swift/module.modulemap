@@ -1,0 +1,32 @@
+module TPMiddle {
+    header "TPMiddle.h"
+    
+    module HID {
+        header "HID/TPHIDManager.swift"
+        header "HID/TPHIDDevice.swift"
+        header "HID/TPHIDInputHandler.swift"
+        header "HID/TPHIDTypes.swift"
+        export *
+    }
+    
+    module Protocols {
+        header "Protocols/TPHIDManagerDelegate.swift"
+        header "Protocols/TPButtonManagerDelegate.swift"
+        header "Protocols/TPHIDTypes.swift"
+        header "Protocols/TPStatusBarControllerDelegate.swift"
+        export *
+    }
+    
+    module Utils {
+        header "Utils/TPLogger.swift"
+        header "Utils/TPConstants.swift"
+        export *
+    }
+    
+    module Presentation {
+        header "Presentation/TPEventViewController.swift"
+        export *
+    }
+    
+    export *
+}
