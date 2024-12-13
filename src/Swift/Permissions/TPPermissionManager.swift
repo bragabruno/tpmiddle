@@ -2,10 +2,10 @@ import Cocoa
 import os.log
 import ApplicationServices
 
-final class TPPermissionManager {
-    static let shared = TPPermissionManager()
-    
+public final class TPPermissionManager {
     // MARK: - Properties
+    
+    public static let shared = TPPermissionManager()
     
     @Published private(set) var waitingForPermissions = false
     @Published private(set) var showingPermissionAlert = false
@@ -18,44 +18,71 @@ final class TPPermissionManager {
     
     // MARK: - Public Methods
     
-    func checkPermissions() -> Error? {
+    public func checkPermissions() -> Error? {
+        var missingPermissions: [String] = []
+        
         // Check Input Monitoring permission
         if !checkInputMonitoringPermission() {
-            return TPError.permissionDenied("Input Monitoring permission is required")
+            missingPermissions.append("Input Monitoring")
         }
         
         // Check Accessibility permission
         if !checkAccessibilityPermission() {
-            return TPError.permissionDenied("Accessibility permission is required")
+            missingPermissions.append("Accessibility")
         }
         
-        return nil
+        // Return appropriate error based on missing permissions
+        switch missingPermissions.count {
+        case 0:
+            return nil
+        case 1:
+            return missingPermissions[0] == "Input Monitoring" 
+                ? TPPermissionError.inputMonitoringDenied
+                : TPPermissionError.accessibilityDenied
+        default:
+            return TPPermissionError.multiplePermissionsDenied
+        }
     }
     
     @MainActor
-    func showPermissionError(_ error: Error, completion: @escaping (Bool) -> Void) {
+    public func showPermissionError(_ error: Error, completion: @escaping (Bool) -> Void) {
         showingPermissionAlert = true
         
         let alert = NSAlert()
         alert.messageText = "Permission Required"
-        alert.informativeText = """
-            TPMiddle requires additional permissions to function properly.
-            
-            \(error.localizedDescription)
-            
-            Please open System Preferences and grant the required permissions.
-            """
+        
+        if let permissionError = error as? TPPermissionError {
+            alert.informativeText = """
+                TPMiddle requires additional permissions to function properly.
+                
+                \(permissionError.localizedDescription)
+                
+                \(permissionError.recoverySuggestion ?? "Please open System Settings and grant the required permissions.")
+                """
+        } else {
+            alert.informativeText = """
+                TPMiddle requires additional permissions to function properly.
+                
+                \(error.localizedDescription)
+                
+                Please open System Settings and grant the required permissions.
+                """
+        }
+        
         alert.alertStyle = .warning
         
-        alert.addButton(withTitle: "Open System Preferences")
+        alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Retry")
         alert.addButton(withTitle: "Quit")
         
         let response = alert.runModal()
         
         switch response {
-        case .alertFirstButtonReturn:  // Open System Preferences
-            openSystemPreferences()
+        case .alertFirstButtonReturn:  // Open System Settings
+            if !openSystemPreferences() {
+                logger.error("Failed to open System Settings")
+                TPErrorHandler.shared.handle(TPPermissionError.systemPreferencesError)
+            }
             waitingForPermissions = true
             showingPermissionAlert = false
             completion(true)
@@ -83,22 +110,24 @@ final class TPPermissionManager {
         return AXIsProcessTrustedWithOptions(options)
     }
     
-    private func openSystemPreferences() {
+    private func openSystemPreferences() -> Bool {
         // First try to open the Security & Privacy pane directly
         var url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
         
         if !NSWorkspace.shared.open(url) {
-            // Fallback to just opening System Preferences
+            // Fallback to just opening System Settings
             url = URL(string: "x-apple.systempreferences:")!
-            NSWorkspace.shared.open(url)
+            return NSWorkspace.shared.open(url)
         }
+        
+        return true
     }
 }
 
 // MARK: - Permission Status Observer
 
 extension TPPermissionManager {
-    func startObservingPermissionStatus() {
+    public func startObservingPermissionStatus() {
         // Create a timer to check permission status periodically when waiting
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             guard let self = self,
@@ -125,33 +154,5 @@ extension TPPermissionManager {
 // MARK: - Notification Names
 
 extension Notification.Name {
-    static let permissionsGranted = Notification.Name("TPPermissionsGrantedNotification")
-}
-
-// MARK: - Error Types
-
-enum TPError: LocalizedError {
-    case permissionDenied(String)
-    case deviceNotFound(String)
-    case configurationError(String)
-    case hidError(String)
-    case resourceNotFound(String)
-    case managerInitializationFailed(String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .permissionDenied(let message):
-            return "Permission denied: \(message)"
-        case .deviceNotFound(let message):
-            return "Device not found: \(message)"
-        case .configurationError(let message):
-            return "Configuration error: \(message)"
-        case .hidError(let message):
-            return "HID error: \(message)"
-        case .resourceNotFound(let message):
-            return "Resource not found: \(message)"
-        case .managerInitializationFailed(let message):
-            return "Manager initialization failed: \(message)"
-        }
-    }
+    public static let permissionsGranted = Notification.Name("TPPermissionsGrantedNotification")
 }

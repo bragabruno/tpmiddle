@@ -1,29 +1,5 @@
 import Foundation
 
-/// Error domain for HID manager errors
-public let TPHIDManagerErrorDomain = "com.tpmiddle.hidmanager"
-
-/// Errors that can occur during HID operations
-public enum TPHIDManagerError: Int, LocalizedError {
-    case permissionDenied = 1
-    case initializationFailed
-    case deviceAccessFailed
-    case invalidConfiguration
-    
-    public var errorDescription: String? {
-        switch self {
-        case .permissionDenied:
-            return "Permission denied to access HID device"
-        case .initializationFailed:
-            return "Failed to initialize HID manager"
-        case .deviceAccessFailed:
-            return "Failed to access HID device"
-        case .invalidConfiguration:
-            return "Invalid HID configuration"
-        }
-    }
-}
-
 /// Button mask constants
 public struct TPHIDButtonMask {
     public static let leftButton: UInt8 = 0x01
