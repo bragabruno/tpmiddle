@@ -5,14 +5,18 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug TPMiddle",
-            "program": "${workspaceFolder}/build/tpmiddle",
+            "program": "${workspaceFolder}/bin/tpmiddle",
             "args": [],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "build",
             "sourceLanguages": [
                 "swift",
                 "cpp"
-            ]
+            ],
+            "env": {
+                "DYLD_FRAMEWORK_PATH": "${workspaceFolder}/build",
+                "DYLD_LIBRARY_PATH": "${workspaceFolder}/build"
+            }
         }
     ]
 }
